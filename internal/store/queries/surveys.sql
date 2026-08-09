@@ -21,6 +21,11 @@ UPDATE surveys
 SET published_version = $2, status = 'live', updated_at = now()
 WHERE id = $1;
 
+-- name: SetStatus :exec
+UPDATE surveys
+SET status = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: InsertVersion :exec
 INSERT INTO survey_versions (survey_id, version, schema)
 VALUES ($1, $2, $3);

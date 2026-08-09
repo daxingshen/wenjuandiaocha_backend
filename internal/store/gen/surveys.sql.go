@@ -155,6 +155,22 @@ func (q *Queries) SetPublished(ctx context.Context, arg SetPublishedParams) erro
 	return err
 }
 
+const setStatus = `-- name: SetStatus :exec
+UPDATE surveys
+SET status = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetStatusParams struct {
+	ID     string
+	Status string
+}
+
+func (q *Queries) SetStatus(ctx context.Context, arg SetStatusParams) error {
+	_, err := q.db.Exec(ctx, setStatus, arg.ID, arg.Status)
+	return err
+}
+
 const updateDraft = `-- name: UpdateDraft :exec
 UPDATE surveys
 SET draft_schema = $2, title = $3, type = $4, updated_at = now()

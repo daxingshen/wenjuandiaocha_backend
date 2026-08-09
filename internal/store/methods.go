@@ -120,6 +120,12 @@ func (s *Store) UpdateDraft(ctx context.Context, id, title, typ string, draftSch
 	})
 }
 
+// SetStatus 只改 status 单列(生命周期状态机:close/reopen 用)。
+// 不校验合法性——状态机守卫在 http 层(据 SurveyMeta.Status/PublishedVersion 判断)。
+func (s *Store) SetStatus(ctx context.Context, id, status string) error {
+	return s.q.SetStatus(ctx, gen.SetStatusParams{ID: id, Status: status})
+}
+
 // GetPublishedSchema 取已发布快照的 schema jsonb;未发布/非 live 返回 ErrNotFound。
 func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, error) {
 	b, err := s.q.GetPublishedSchema(ctx, id)

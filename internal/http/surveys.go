@@ -37,13 +37,39 @@ func (s *Server) listSurveys(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// createSurvey POST /api/surveys —— 建空草稿,返回 { id }。draft_schema 为最小 SurveySchema。
+// createSurvey POST /api/surveys —— 首存落库,返回 { id }(后端分配 id)。
+// body 是前端内存草稿的整份 SurveySchema(不保存则前端不发此请求 → 后端零写入);
+// 空 body 回落最小 schema(仍支持直接建空)。id 一律由后端分配并覆盖进 schema。
+// 与 updateSurvey 一致:首存只落草稿、不做逻辑求值,发布时才严格校验。
 func (s *Server) createSurvey(c *gin.Context) {
 	id := newID()
-	schema := domain.SurveySchema{
-		ID: id, Type: domain.SurveySurvey, Title: "未命名问卷", Version: 1,
-		Questions: []domain.Question{}, Rules: []domain.LogicRule{},
+	body, _ := c.GetRawData()
+
+	var schema domain.SurveySchema
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &schema); err != nil {
+			fail(c, http.StatusBadRequest, "schema 格式错误")
+			return
+		}
 	}
+	// 补默认 + 强制后端分配的 id(客户端传的 id 一律忽略,防越权/串号)。
+	schema.ID = id
+	if schema.Type == "" {
+		schema.Type = domain.SurveySurvey
+	}
+	if schema.Title == "" {
+		schema.Title = "未命名问卷"
+	}
+	if schema.Version == 0 {
+		schema.Version = 1
+	}
+	if schema.Questions == nil {
+		schema.Questions = []domain.Question{}
+	}
+	if schema.Rules == nil {
+		schema.Rules = []domain.LogicRule{}
+	}
+
 	schemaJSON, _ := json.Marshal(schema)
 	if err := s.store.CreateSurvey(c.Request.Context(), id, currentUserID(c), string(schema.Type), schema.Title, schemaJSON); err != nil {
 		s.storeError(c, err)
@@ -97,6 +123,42 @@ func (s *Server) publishSurvey(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "version": version})
+}
+
+// closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。
+// 状态机守卫:仅 live 可结束;非法跳转返回 409。归属校验。
+func (s *Server) closeSurvey(c *gin.Context) {
+	meta, err := s.ownedSurvey(c)
+	if err != nil {
+		return
+	}
+	if meta.Status != "live" {
+		fail(c, http.StatusConflict, "仅进行中的问卷可结束")
+		return
+	}
+	if err := s.store.SetStatus(c.Request.Context(), meta.ID, "closed"); err != nil {
+		s.storeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// reopenSurvey POST /api/surveys/:id/reopen —— 重新打开(closed → live)。
+// 复用现有已发布快照(不重新冻结);守卫:仅 closed 且曾发布过可重开;非法跳转返回 409。
+func (s *Server) reopenSurvey(c *gin.Context) {
+	meta, err := s.ownedSurvey(c)
+	if err != nil {
+		return
+	}
+	if meta.Status != "closed" || meta.PublishedVersion == nil {
+		fail(c, http.StatusConflict, "仅已结束且曾发布过的问卷可重新打开")
+		return
+	}
+	if err := s.store.SetStatus(c.Request.Context(), meta.ID, "live"); err != nil {
+		s.storeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // ownedSurvey 取 :id 问卷并校验归属;非本人 → 404(不泄露存在性),已写响应时返回 err。
