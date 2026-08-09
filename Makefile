@@ -7,6 +7,8 @@ endif
 GOOSE_DRIVER ?= postgres
 GOOSE_DBSTRING ?= $(DATABASE_URL)
 MIGRATIONS := db/migrations
+# goose 从环境变量读 driver/dbstring(新版不再接受位置参数);显式导出供 migrate 用。
+export GOOSE_DRIVER GOOSE_DBSTRING
 
 .PHONY: help db-up db-down migrate migrate-down sqlc run seed test vet tidy
 
@@ -28,10 +30,10 @@ db-down:
 	docker compose down
 
 migrate:
-	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS) $(GOOSE_DRIVER) "$(GOOSE_DBSTRING)" up
+	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS) up
 
 migrate-down:
-	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS) $(GOOSE_DRIVER) "$(GOOSE_DBSTRING)" down
+	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS) down
 
 # sqlc v1.29 是最后一批支持 go1.25 工具链的版本;GOTOOLCHAIN=local 避免它拉 go1.26
 sqlc:
