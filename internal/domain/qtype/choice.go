@@ -3,42 +3,87 @@ package qtype
 
 import (
 	"fmt"
+	"strings"
 
 	"wenjuandiaocha_backend/internal/domain"
 )
 
 // ---------- single-choice ----------
-// answer 形状:string(选项 value)。
+// answer 形状:string(选项 value),或带填空的对象形 {value, text}(选中允许填空的选项时)。
+// 复刻前端 packages/question-types/src/single-choice/handler.ts。
+
+// singleOption 单选选项:比 matrix 共用的 option 多一个 fill(允许填空)。
+// style/image 是纯前端渲染配置,后端不关心但要能容忍反序列化(用 json.RawMessage 忽略)。
+type singleOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Fill  *struct {
+		Enabled  bool `json:"enabled"`
+		Required bool `json:"required"`
+	} `json:"fill"`
+}
 
 type singleChoiceProps struct {
-	Options []option `json:"options"`
+	Options []singleOption `json:"options"`
 }
 
 type singleChoice struct{}
 
 func (singleChoice) Type() string { return "single-choice" }
 
+// readSingleAnswer 从答案取选项 value 与填空 text,兼容裸 string 与对象形 {value,text}。
+// ok=false 表示格式非法(既非 string 也非带 string value 的对象)。
+func readSingleAnswer(answer any) (value string, text string, ok bool) {
+	switch a := answer.(type) {
+	case string:
+		return a, "", true
+	case map[string]any:
+		v, isStr := a["value"].(string)
+		if !isStr {
+			return "", "", false
+		}
+		t, _ := a["text"].(string)
+		return v, t, true
+	default:
+		return "", "", false
+	}
+}
+
 func (singleChoice) Validate(q domain.Question, answer any) string {
 	var p singleChoiceProps
 	unmarshalProps(q.Props, &p)
-	s, ok := answer.(string)
+	value, text, ok := readSingleAnswer(answer)
 	if !ok {
 		return "答案格式应为单个选项"
 	}
-	for _, o := range p.Options {
-		if o.Value == s {
-			return ""
+	var opt *singleOption
+	for i := range p.Options {
+		if p.Options[i].Value == value {
+			opt = &p.Options[i]
+			break
 		}
 	}
-	return "所选选项不存在"
+	if opt == nil {
+		return "所选选项不存在"
+	}
+	// 带填空选项:必填时文本不能为空。
+	if opt.Fill != nil && opt.Fill.Enabled && opt.Fill.Required && strings.TrimSpace(text) == "" {
+		return "请填写补充内容"
+	}
+	return ""
 }
 
 func (singleChoice) Normalize(q domain.Question, answer any) []domain.NormalizedRow {
-	s, ok := answer.(string)
-	if !ok || s == "" {
+	value, text, ok := readSingleAnswer(answer)
+	if !ok || value == "" {
 		return nil
 	}
-	return []domain.NormalizedRow{{QID: q.ID, Value: s}}
+	rows := []domain.NormalizedRow{{QID: q.ID, Value: value}}
+	// 填空文本非空 → 追加一行(subId 'fill'),供统计/导出取原文。
+	if text != "" {
+		rows = append(rows, domain.NormalizedRow{QID: q.ID, SubID: "fill", Value: text})
+	}
+	return rows
 }
 
 // ---------- multi-choice ----------

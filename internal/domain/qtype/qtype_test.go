@@ -49,6 +49,45 @@ func TestSingleChoice(t *testing.T) {
 	}
 }
 
+// TestSingleChoiceFill 覆盖「允许填空」:answer 为对象形 {value,text},前后端一致(决策1-A)。
+func TestSingleChoiceFill(t *testing.T) {
+	q := mkQ("q1", "single-choice", true, map[string]any{
+		"options": []map[string]any{
+			{"value": "a", "label": "A"},
+			{"value": "other", "label": "其他", "fill": map[string]any{"enabled": true, "required": true}},
+		},
+	})
+	h := handler(t, "single-choice")
+
+	// 对象形合法答案通过(经 JSON 编解码后 answer 是 map[string]any)。
+	okAns := map[string]any{"value": "other", "text": "具体用途"}
+	if msg := h.Validate(q, okAns); msg != "" {
+		t.Errorf("对象形合法答案应通过,得 %q", msg)
+	}
+	// fill.required 且文本为空 → 报填空必填。
+	if msg := h.Validate(q, map[string]any{"value": "other", "text": ""}); msg != "请填写补充内容" {
+		t.Errorf("必填填空空文本应报错,得 %q", msg)
+	}
+	// 裸 string 选中 other(无文本)也应报填空必填。
+	if msg := h.Validate(q, "other"); msg != "请填写补充内容" {
+		t.Errorf("裸 string 选中必填填空项应报错,得 %q", msg)
+	}
+	// 对象形不存在的选项 → 报错。
+	if msg := h.Validate(q, map[string]any{"value": "z", "text": "x"}); msg != "所选选项不存在" {
+		t.Errorf("对象形非法选项应报错,得 %q", msg)
+	}
+	// normalize:对象形带非空文本产两行(value + fill 子行)。
+	rows := h.Normalize(q, okAns)
+	if len(rows) != 2 || rows[0].Value != "other" || rows[1].SubID != "fill" || rows[1].Value != "具体用途" {
+		t.Errorf("填空 normalize 应产两行(value+fill),得 %+v", rows)
+	}
+	// 对象形文本为空只产 value 一行。
+	rows = h.Normalize(q, map[string]any{"value": "other", "text": ""})
+	if len(rows) != 1 || rows[0].Value != "other" {
+		t.Errorf("空文本应只产 value 一行,得 %+v", rows)
+	}
+}
+
 func TestMultiChoice_RequiredEmptyArray(t *testing.T) {
 	// 陷阱核心:空数组在通用层算「已答」,必答判断必须在 handler 内。
 	q := mkQ("q1", "multi-choice", true, map[string]any{

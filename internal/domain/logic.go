@@ -26,17 +26,25 @@ func isAnswered(a any) bool {
 	return true
 }
 
-// drillSubID 复刻 logic.ts:有 subId 时钻入 answers[qid][subId];
-// 该题未答或非「非数组对象」则子行取 nil。
-func drillSubID(raw any, subID string) any {
-	if subID == "" {
-		return raw
+// pickComparable 复刻 logic.ts 的取值:
+//   - 有 subId:钻入 answers[qid][subId];该题未答或非「非数组对象」则子行取 nil。
+//   - 无 subId:若答案是「带自有 value 字段的对象」(单选带填空 {value,text}),取其 value;
+//     否则原样返回(裸 string/number、数组、矩阵整题对象等)。这样标量题带元数据后,
+//     既有 eq/ne/answered 仍按选项 value 比较,不降级(见 wiki 03-design 决策1-A)。
+func pickComparable(raw any, subID string) any {
+	if subID != "" {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil
+		}
+		return m[subID]
 	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return nil
+	if m, ok := raw.(map[string]any); ok {
+		if v, has := m["value"]; has {
+			return v
+		}
 	}
-	return m[subID]
+	return raw
 }
 
 // jsEqual 复刻 JS 严格相等 === 在「经过 JSON 编解码的标量」上的行为。
@@ -74,7 +82,7 @@ func toFloat(v any) (float64, bool) {
 // evalCondition 判断单个条件是否成立。空值/未作答语义集中在此,是前后端最易漂移处。
 func evalCondition(c Condition, answers Answers) bool {
 	raw := answers[c.QID]
-	a := drillSubID(raw, c.SubID)
+	a := pickComparable(raw, c.SubID)
 	answered := isAnswered(a)
 
 	switch c.Op {
