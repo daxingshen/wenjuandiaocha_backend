@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "db/migrations"          # 与 goose 迁移同源:sqlc 从建表 SQL 推列类型
+    queries: "internal/store/queries"
+    gen:
+      go:
+        package: "gen"
+        out: "internal/store/gen"
+        sql_package: "pgx/v5"
+        emit_json_tags: false
+        emit_pointers_for_null_types: true
+        overrides:
+          # jsonb 列拿到手即 []byte,原样转发给前端 / 交 domain 解析,不包 pgtype
+          - db_type: "jsonb"
+            go_type:
+              type: "byte"
+              slice: true
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              type: "byte"
+              slice: true
