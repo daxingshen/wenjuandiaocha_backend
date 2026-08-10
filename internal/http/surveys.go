@@ -117,12 +117,13 @@ func (s *Server) publishSurvey(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	version, err := s.store.Publish(c.Request.Context(), meta.ID, meta.DraftSchema)
+	version, unchanged, err := s.store.Publish(c.Request.Context(), meta.ID, meta.DraftSchema)
 	if err != nil {
 		s.storeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "version": version})
+	// unchanged=true:草稿与当前对外版本一致,未造新版本(重发免空版)。前端据此提示「内容未变」。
+	c.JSON(http.StatusOK, gin.H{"ok": true, "version": version, "unchanged": unchanged})
 }
 
 // closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。

@@ -71,6 +71,26 @@ func (q *Queries) GetSurvey(ctx context.Context, id string) (Survey, error) {
 	return i, err
 }
 
+const getVersionSchema = `-- name: GetVersionSchema :one
+SELECT schema
+FROM survey_versions
+WHERE survey_id = $1 AND version = $2
+`
+
+type GetVersionSchemaParams struct {
+	SurveyID string
+	Version  int32
+}
+
+// 按显式版本号取历史发布快照(版本锚定提交:作答者交哪版就按哪版校验)。
+// 不含 status 过滤——status 由 handler 单独判定(live 才收);此处只负责按版取快照。
+func (q *Queries) GetVersionSchema(ctx context.Context, arg GetVersionSchemaParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getVersionSchema, arg.SurveyID, arg.Version)
+	var schema []byte
+	err := row.Scan(&schema)
+	return schema, err
+}
+
 const insertVersion = `-- name: InsertVersion :exec
 INSERT INTO survey_versions (survey_id, version, schema)
 VALUES ($1, $2, $3)
