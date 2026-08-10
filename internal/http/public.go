@@ -35,6 +35,9 @@ func (s *Server) getPublicSurvey(c *gin.Context) {
 
 type submitReq struct {
 	Answers domain.Answers `json:"answers"`
+	// Version 作答者实际看到的问卷版本(版本锚定提交)。>0 时后端按该版快照校验落库,
+	// 消除「作答中所有者重发新版 → 拿没见过的题报必答」死局。0/缺省 = 旧客户端,回落当前发布版。
+	Version int32 `json:"version"`
 }
 
 // submitAnswers POST /api/public/surveys/:id/answers —— 权威校验 + 双写落库。
@@ -52,8 +55,8 @@ func (s *Server) submitAnswers(c *gin.Context) {
 		return
 	}
 
-	// 载入发布版快照 —— 校验/规范化以它为准,不信任客户端传的 schema。
-	schemaJSON, err := s.store.GetPublishedSchema(c.Request.Context(), id)
+	// 收答前置:问卷必须存在且 status=live(close 后停收,与 GetPublishedSchema 的 live 过滤语义一致)。
+	meta, err := s.store.GetSurvey(c.Request.Context(), id)
 	if err != nil {
 		if err == store.ErrNotFound {
 			fail(c, http.StatusNotFound, "问卷不存在或未发布")
@@ -61,6 +64,36 @@ func (s *Server) submitAnswers(c *gin.Context) {
 		}
 		s.storeError(c, err)
 		return
+	}
+	if meta.Status != "live" {
+		fail(c, http.StatusNotFound, "问卷不存在或未发布")
+		return
+	}
+
+	// 载入快照 —— 校验/规范化以它为准,不信任客户端传的 schema。
+	// 版本锚定:客户端带 version>0 → 按该历史版取快照(作答者交哪版就按哪版校验);
+	// 该版不存在 → 400 引导刷新。version==0(旧客户端)回落当前发布版,保持向后兼容。
+	var schemaJSON []byte
+	if req.Version > 0 {
+		schemaJSON, err = s.store.GetVersionSchema(c.Request.Context(), id, req.Version)
+		if err != nil {
+			if err == store.ErrNotFound {
+				fail(c, http.StatusBadRequest, "问卷版本已失效,请刷新后重新作答")
+				return
+			}
+			s.storeError(c, err)
+			return
+		}
+	} else {
+		schemaJSON, err = s.store.GetPublishedSchema(c.Request.Context(), id)
+		if err != nil {
+			if err == store.ErrNotFound {
+				fail(c, http.StatusNotFound, "问卷不存在或未发布")
+				return
+			}
+			s.storeError(c, err)
+			return
+		}
 	}
 	var schema domain.SurveySchema
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
@@ -78,10 +111,10 @@ func (s *Server) submitAnswers(c *gin.Context) {
 
 	// raw 存后端认定的答案(原样存客户端提交的 answers 亦可,但落库规范化行以后端为准)。
 	rawJSON, _ := json.Marshal(req.Answers)
-	meta := clientMeta(c)
+	metaJSON := clientMeta(c)
 
 	respID := newID()
-	if err := s.store.SaveSubmission(c.Request.Context(), respID, id, schema.Version, rawJSON, meta, rows); err != nil {
+	if err := s.store.SaveSubmission(c.Request.Context(), respID, id, schema.Version, rawJSON, metaJSON, rows); err != nil {
 		s.storeError(c, err)
 		return
 	}

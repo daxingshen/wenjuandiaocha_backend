@@ -36,6 +36,13 @@ FROM surveys s
 JOIN survey_versions sv ON sv.survey_id = s.id AND sv.version = s.published_version
 WHERE s.id = $1 AND s.status = 'live';
 
+-- name: GetVersionSchema :one
+-- 按显式版本号取历史发布快照(版本锚定提交:作答者交哪版就按哪版校验)。
+-- 不含 status 过滤——status 由 handler 单独判定(live 才收);此处只负责按版取快照。
+SELECT schema
+FROM survey_versions
+WHERE survey_id = $1 AND version = $2;
+
 -- name: MaxVersion :one
 SELECT COALESCE(MAX(version), 0)::int AS max_version
 FROM survey_versions WHERE survey_id = $1;

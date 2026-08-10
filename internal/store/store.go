@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -75,18 +76,36 @@ func (s *Store) SaveSubmission(ctx context.Context, respID, surveyID string, ver
 
 // --------- 发布:快照 draft_schema → survey_versions + 更新指针,单事务 ---------
 
-// Publish 冻结当前草稿为新版本快照,并把 surveys 指向它、status=live。返回新版本号。
-func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte) (int, error) {
+// Publish 冻结当前草稿为新版本快照,并把 surveys 指向它、status=live。返回 (新版本号, 是否免发).
+// 免发(unchanged=true):待发布草稿与「当前对外版本」内容一致时,不造新版本、不动指针,
+// 返回当前版本号——避免重新发布空转出无意义的版本膨胀。首发(无历史版)不判等,照常发。
+func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte) (int, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
+		return 0, false, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	q := s.q.WithTx(tx)
 	maxV, err := q.MaxVersion(ctx, surveyID)
 	if err != nil {
-		return 0, fmt.Errorf("max version: %w", err)
+		return 0, false, fmt.Errorf("max version: %w", err)
+	}
+	// 免发判等:publish 每次 version+1 且 published_version=新 max,close/reopen 不造版本,
+	// 故 maxV 版快照 == 当前对外快照。与草稿语义判等(忽略 version 字段——发布必改写它,是设计性差异)。
+	if maxV > 0 {
+		curr, err := q.GetVersionSchema(ctx, gen.GetVersionSchemaParams{SurveyID: surveyID, Version: maxV})
+		if err != nil {
+			return 0, false, fmt.Errorf("get current version: %w", err)
+		}
+		same, err := schemaEqualIgnoringVersion(draftSchema, curr)
+		if err != nil {
+			return 0, false, fmt.Errorf("compare schema: %w", err)
+		}
+		if same {
+			// 内容未变:不插新版、不动指针。返回当前版本号 + unchanged。
+			return int(maxV), true, nil
+		}
 	}
 	next := int(maxV) + 1
 	// 把快照内 schema.version 盖成分配到的版本号:草稿 JSON 里的 version 恒为 1(前端不递增),
@@ -94,25 +113,41 @@ func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte
 	// 在此对齐,保证「行版本 == 快照 JSON version == 落库 survey_version」(版本隔离,约束 5)。
 	stamped, err := stampVersion(draftSchema, next)
 	if err != nil {
-		return 0, fmt.Errorf("stamp version: %w", err)
+		return 0, false, fmt.Errorf("stamp version: %w", err)
 	}
 	if err := q.InsertVersion(ctx, gen.InsertVersionParams{
 		SurveyID: surveyID, Version: int32(next), Schema: stamped,
 	}); err != nil {
-		return 0, fmt.Errorf("insert version: %w", err)
+		return 0, false, fmt.Errorf("insert version: %w", err)
 	}
 	if err := q.SetPublished(ctx, gen.SetPublishedParams{
 		ID: surveyID, PublishedVersion: ptrInt32(int32(next)),
 	}); err != nil {
-		return 0, fmt.Errorf("set published: %w", err)
+		return 0, false, fmt.Errorf("set published: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return next, nil
+	return next, false, nil
 }
 
 func ptrInt32(v int32) *int32 { return &v }
+
+// schemaEqualIgnoringVersion 语义判等两份 schema JSON,忽略 version 字段
+// (发布时 stampVersion 必然改写 version,属设计性差异,不算内容变化)。
+// 用 map 判等而非字节比较:草稿是前端 PUT 的原样 body,快照是发布时 re-marshal 的,字节序/空白可能不同。
+func schemaEqualIgnoringVersion(a, b []byte) (bool, error) {
+	var ma, mb map[string]any
+	if err := json.Unmarshal(a, &ma); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal(b, &mb); err != nil {
+		return false, err
+	}
+	delete(ma, "version")
+	delete(mb, "version")
+	return reflect.DeepEqual(ma, mb), nil
+}
 
 // stampVersion 把 schema JSON 的 version 字段改写为 v,其余字段原样保留。
 func stampVersion(schemaJSON []byte, v int) ([]byte, error) {

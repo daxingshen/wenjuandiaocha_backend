@@ -135,6 +135,16 @@ func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, erro
 	return b, nil
 }
 
+// GetVersionSchema 按显式版本号取历史发布快照(版本锚定提交)。该版不存在返回 ErrNotFound。
+// 不做 status 过滤——status(live 才收)由 http 层单独判定。
+func (s *Store) GetVersionSchema(ctx context.Context, id string, version int32) ([]byte, error) {
+	b, err := s.q.GetVersionSchema(ctx, gen.GetVersionSchemaParams{SurveyID: id, Version: version})
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return b, nil
+}
+
 // CountResponses 统计某问卷的答卷数(COUNT :one 恒返回一行,无 no-rows,直接透传 err)。
 func (s *Store) CountResponses(ctx context.Context, id string) (int32, error) {
 	return s.q.CountResponses(ctx, id)
