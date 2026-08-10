@@ -9,7 +9,7 @@ FROM surveys WHERE id = $1;
 -- name: ListSurveysByOwner :many
 SELECT id, title, type, status, updated_at
 FROM surveys WHERE owner_id = $1
-ORDER BY updated_at DESC;
+ORDER BY created_at DESC;
 
 -- name: UpdateDraft :exec
 UPDATE surveys

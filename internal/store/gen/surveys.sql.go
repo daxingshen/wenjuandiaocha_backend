@@ -90,7 +90,7 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) er
 const listSurveysByOwner = `-- name: ListSurveysByOwner :many
 SELECT id, title, type, status, updated_at
 FROM surveys WHERE owner_id = $1
-ORDER BY updated_at DESC
+ORDER BY created_at DESC
 `
 
 type ListSurveysByOwnerRow struct {
