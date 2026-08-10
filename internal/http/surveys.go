@@ -161,6 +161,31 @@ func (s *Server) reopenSurvey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// surveyStats 对齐前端问卷概览:状态 + 已发布版本 + 答卷数。
+type surveyStats struct {
+	Status           string `json:"status"`
+	PublishedVersion *int32 `json:"publishedVersion"`
+	ResponseCount    int32  `json:"responseCount"`
+}
+
+// surveyStats GET /api/surveys/:id/stats —— 问卷概览统计。归属校验。
+func (s *Server) surveyStats(c *gin.Context) {
+	meta, err := s.ownedSurvey(c)
+	if err != nil {
+		return // ownedSurvey 已写响应
+	}
+	count, err := s.store.CountResponses(c.Request.Context(), meta.ID)
+	if err != nil {
+		s.storeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, surveyStats{
+		Status:           meta.Status,
+		PublishedVersion: meta.PublishedVersion,
+		ResponseCount:    count,
+	})
+}
+
 // ownedSurvey 取 :id 问卷并校验归属;非本人 → 404(不泄露存在性),已写响应时返回 err。
 func (s *Server) ownedSurvey(c *gin.Context) (store.SurveyMeta, error) {
 	meta, err := s.store.GetSurvey(c.Request.Context(), c.Param("id"))

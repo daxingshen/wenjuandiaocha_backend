@@ -134,3 +134,8 @@ func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, erro
 	}
 	return b, nil
 }
+
+// CountResponses 统计某问卷的答卷数(COUNT :one 恒返回一行,无 no-rows,直接透传 err)。
+func (s *Store) CountResponses(ctx context.Context, id string) (int32, error) {
+	return s.q.CountResponses(ctx, id)
+}

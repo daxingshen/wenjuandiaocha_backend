@@ -54,6 +54,7 @@ func (s *Server) Router() *gin.Engine {
 		sv.POST("/:id/publish", s.publishSurvey)
 		sv.POST("/:id/close", s.closeSurvey)
 		sv.POST("/:id/reopen", s.reopenSurvey)
+		sv.GET("/:id/stats", s.surveyStats)
 	}
 
 	return r
