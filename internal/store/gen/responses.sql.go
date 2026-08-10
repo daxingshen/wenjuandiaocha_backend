@@ -9,6 +9,17 @@ import (
 	"context"
 )
 
+const countResponses = `-- name: CountResponses :one
+SELECT COUNT(*)::int AS count FROM responses WHERE survey_id = $1
+`
+
+func (q *Queries) CountResponses(ctx context.Context, surveyID string) (int32, error) {
+	row := q.db.QueryRow(ctx, countResponses, surveyID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertAnswerRow = `-- name: InsertAnswerRow :exec
 INSERT INTO answer_rows (response_id, survey_id, survey_version, qid, sub_id, value_text, value_num)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
