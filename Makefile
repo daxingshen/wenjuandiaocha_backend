@@ -45,8 +45,10 @@ proto:
 	buf generate
 
 # wire:从 internal/di/wire.go 生成 wire_gen.go(改了 provider set 后跑)。
+# -mod=mod 让 go run 自行补 wire CLI 的构建依赖(google/subcommands、x/tools),
+# 不污染本仓 go.mod/go.sum(与 sqlc 的 go run @version 同理,CLI 工具链与应用依赖隔离)。
 wire:
-	cd internal/di && go run github.com/google/wire/cmd/wire
+	cd internal/di && GOFLAGS=-mod=mod go run github.com/google/wire/cmd/wire
 
 run:
 	go run ./cmd/server
