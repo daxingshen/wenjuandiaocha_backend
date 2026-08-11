@@ -10,7 +10,7 @@ MIGRATIONS := db/migrations
 # goose 从环境变量读 driver/dbstring(新版不再接受位置参数);显式导出供 migrate 用。
 export GOOSE_DRIVER GOOSE_DBSTRING
 
-.PHONY: help db-up db-down migrate migrate-down sqlc proto wire run seed test vet tidy
+.PHONY: help db-up db-down migrate migrate-down sqlc wire run seed test vet tidy
 
 help:
 	@echo "db-up        起 postgres(docker compose)"
@@ -38,11 +38,6 @@ migrate-down:
 # sqlc v1.29 是最后一批支持 go1.25 工具链的版本;GOTOOLCHAIN=local 避免它拉 go1.26
 sqlc:
 	GOTOOLCHAIN=local go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0 generate
-
-# proto:从 api/api.proto 生成 api/api.pb.go(buf + 本地 protoc-gen-go)。改了 proto 后跑。
-proto:
-	buf lint
-	buf generate
 
 # wire:从 internal/di/wire.go 生成 wire_gen.go(改了 provider set 后跑)。
 # -mod=mod 让 go run 自行补 wire CLI 的构建依赖(google/subcommands、x/tools),

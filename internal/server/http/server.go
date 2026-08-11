@@ -6,6 +6,12 @@ import (
 	"github.com/google/wire"
 
 	"wenjuandiaocha_backend/internal/config"
+	authmw "wenjuandiaocha_backend/internal/server/http/middleware/auth"
+	"wenjuandiaocha_backend/internal/server/http/middleware/clientinfo"
+	"wenjuandiaocha_backend/internal/server/http/middleware/cors"
+	"wenjuandiaocha_backend/internal/server/http/middleware/logger"
+	"wenjuandiaocha_backend/internal/server/http/middleware/recovery"
+	"wenjuandiaocha_backend/internal/server/http/middleware/requestid"
 	svcauth "wenjuandiaocha_backend/internal/service/auth"
 	"wenjuandiaocha_backend/internal/service/submission"
 	"wenjuandiaocha_backend/internal/service/survey"
@@ -33,27 +39,30 @@ func (s *Server) Router() *gin.Engine {
 	// 本地单机部署,不信任任何转发代理头(ClientIP 取真实 RemoteAddr)。
 	// 未来置于反代后,改为设置反代 IP。
 	_ = r.SetTrustedProxies(nil)
-	r.Use(requestID(), recovery(), logger(), cors())
+	r.Use(requestid.New(), recovery.New(), logger.New(), cors.New(), clientinfo.New())
 
-	api := r.Group("/api")
+	// requireAuth 构造一次复用(依赖注入 auth service)。
+	requireAuth := authmw.RequireAuth(s.auth)
+
+	root := r.Group("/api")
 
 	// public:匿名公开。取发布快照 + 提交答卷。无鉴权(runtime 决策 7)。
-	pub := api.Group("/public")
+	pub := root.Group("/public")
 	{
 		pub.GET("/surveys/:id", s.getPublicSurvey)
 		pub.POST("/surveys/:id/answers", s.submitAnswers)
 	}
 
 	// auth:登录/登出/取当前用户。
-	a := api.Group("/auth")
+	a := root.Group("/auth")
 	{
 		a.POST("/login", s.login)
 		a.POST("/logout", s.logout)
-		a.GET("/me", s.requireAuth, s.me)
+		a.GET("/me", requireAuth, s.me)
 	}
 
 	// studio:需登录。问卷 CRUD + 发布。
-	sv := api.Group("/surveys", s.requireAuth)
+	sv := root.Group("/surveys", requireAuth)
 	{
 		sv.GET("", s.listSurveys)
 		sv.POST("", s.createSurvey)

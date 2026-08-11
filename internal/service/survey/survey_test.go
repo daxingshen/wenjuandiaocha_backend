@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
 )
@@ -37,6 +38,11 @@ func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte) (int, bool, e
 }
 func (f *fakeStore) CountResponses(_ context.Context, _ string) (int32, error) { return 0, nil }
 
+// ctxUser 造一个带指定用户身份的 ctx(替代原 Req.OwnerID)。
+func ctxUser(uid string) context.Context {
+	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid})
+}
+
 func statusOf(t *testing.T, err error) int {
 	t.Helper()
 	s, _, ok := ecode.FromError(err)
@@ -50,7 +56,7 @@ func statusOf(t *testing.T, err error) int {
 func TestOwned_NotOwner_Returns404(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
 	m := New(f)
-	_, err := m.Get(context.Background(), GetReq{ID: "s1", OwnerID: "bob"})
+	_, err := m.Get(ctxUser("bob"), api.SurveyGetReq{ID: "s1"})
 	if got := statusOf(t, err); got != http.StatusNotFound {
 		t.Fatalf("非本人 Get 状态 = %d, want 404", got)
 	}
@@ -60,7 +66,7 @@ func TestOwned_NotOwner_Returns404(t *testing.T) {
 func TestOwned_NotFound_Returns404(t *testing.T) {
 	f := &fakeStore{getErr: dao.ErrNotFound}
 	m := New(f)
-	_, err := m.Close(context.Background(), CloseReq{ID: "s1", OwnerID: "alice"})
+	_, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"})
 	if got := statusOf(t, err); got != http.StatusNotFound {
 		t.Fatalf("查无 Close 状态 = %d, want 404", got)
 	}
@@ -70,7 +76,7 @@ func TestOwned_NotFound_Returns404(t *testing.T) {
 func TestClose_NotLive_Returns409(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
 	m := New(f)
-	_, err := m.Close(context.Background(), CloseReq{ID: "s1", OwnerID: "alice"})
+	_, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"})
 	if got := statusOf(t, err); got != http.StatusConflict {
 		t.Fatalf("draft Close 状态 = %d, want 409", got)
 	}
@@ -83,7 +89,7 @@ func TestClose_NotLive_Returns409(t *testing.T) {
 func TestClose_Live_SetsClosed(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
 	m := New(f)
-	if _, err := m.Close(context.Background(), CloseReq{ID: "s1", OwnerID: "alice"}); err != nil {
+	if _, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"}); err != nil {
 		t.Fatalf("live Close 应成功,得到 %v", err)
 	}
 	if f.setStatus != "closed" {
@@ -95,7 +101,7 @@ func TestClose_Live_SetsClosed(t *testing.T) {
 func TestReopen_NeverPublished_Returns409(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: nil}}
 	m := New(f)
-	_, err := m.Reopen(context.Background(), ReopenReq{ID: "s1", OwnerID: "alice"})
+	_, err := m.Reopen(ctxUser("alice"), api.SurveyReopenReq{ID: "s1"})
 	if got := statusOf(t, err); got != http.StatusConflict {
 		t.Fatalf("未发布 Reopen 状态 = %d, want 409", got)
 	}
@@ -106,7 +112,7 @@ func TestReopen_Published_SetsLive(t *testing.T) {
 	v := int32(2)
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: &v}}
 	m := New(f)
-	if _, err := m.Reopen(context.Background(), ReopenReq{ID: "s1", OwnerID: "alice"}); err != nil {
+	if _, err := m.Reopen(ctxUser("alice"), api.SurveyReopenReq{ID: "s1"}); err != nil {
 		t.Fatalf("已发布 Reopen 应成功,得到 %v", err)
 	}
 	if f.setStatus != "live" {
@@ -118,7 +124,7 @@ func TestReopen_Published_SetsLive(t *testing.T) {
 func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 	f := &fakeStore{}
 	m := New(f)
-	resp, err := m.Create(context.Background(), CreateReq{OwnerID: "alice", Body: nil})
+	resp, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: nil})
 	if err != nil {
 		t.Fatalf("Create 空 body 应成功,得到 %v", err)
 	}
@@ -131,7 +137,7 @@ func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 func TestCreate_BadJSON_Returns400(t *testing.T) {
 	f := &fakeStore{}
 	m := New(f)
-	_, err := m.Create(context.Background(), CreateReq{OwnerID: "alice", Body: []byte("{not json")})
+	_, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: []byte("{not json")})
 	if got := statusOf(t, err); got != http.StatusBadRequest {
 		t.Fatalf("非法 JSON Create 状态 = %d, want 400", got)
 	}

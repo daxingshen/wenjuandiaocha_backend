@@ -7,7 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"wenjuandiaocha_backend/internal/service/survey"
+	"wenjuandiaocha_backend/api"
+	"wenjuandiaocha_backend/internal/server/http/render"
 )
 
 // surveyListItem 是 HTTP 响应形状(带 json tag),由 service.SurveyListItem 翻译而来。
@@ -21,9 +22,9 @@ type surveyListItem struct {
 }
 
 func (s *Server) listSurveys(c *gin.Context) {
-	resp, err := s.surveys.List(c.Request.Context(), survey.ListReq{OwnerID: currentUserID(c)})
+	resp, err := s.surveys.List(c.Request.Context())
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	out := make([]surveyListItem, 0, len(resp.Items))
@@ -39,9 +40,9 @@ func (s *Server) listSurveys(c *gin.Context) {
 // createSurvey POST /api/surveys —— 首存落库,返回 { id }(后端分配 id)。
 func (s *Server) createSurvey(c *gin.Context) {
 	body, _ := c.GetRawData()
-	resp, err := s.surveys.Create(c.Request.Context(), survey.CreateReq{OwnerID: currentUserID(c), Body: body})
+	resp, err := s.surveys.Create(c.Request.Context(), api.SurveyCreateReq{Body: body})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": resp.ID})
@@ -49,9 +50,9 @@ func (s *Server) createSurvey(c *gin.Context) {
 
 // getSurvey GET /api/surveys/:id —— 返回草稿 SurveySchema(供编辑)。归属校验。
 func (s *Server) getSurvey(c *gin.Context) {
-	resp, err := s.surveys.Get(c.Request.Context(), survey.GetReq{ID: c.Param("id"), OwnerID: currentUserID(c)})
+	resp, err := s.surveys.Get(c.Request.Context(), api.SurveyGetReq{ID: c.Param("id")})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	c.Data(http.StatusOK, "application/json; charset=utf-8", resp.Schema)
@@ -61,11 +62,11 @@ func (s *Server) getSurvey(c *gin.Context) {
 func (s *Server) updateSurvey(c *gin.Context) {
 	body, err := c.GetRawData()
 	if err != nil {
-		fail(c, http.StatusBadRequest, "读请求体失败")
+		render.Fail(c, http.StatusBadRequest, "读请求体失败")
 		return
 	}
-	if _, err := s.surveys.Update(c.Request.Context(), survey.UpdateReq{ID: c.Param("id"), OwnerID: currentUserID(c), Body: body}); err != nil {
-		renderError(c, err)
+	if _, err := s.surveys.Update(c.Request.Context(), api.SurveyUpdateReq{ID: c.Param("id"), Body: body}); err != nil {
+		render.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -73,9 +74,9 @@ func (s *Server) updateSurvey(c *gin.Context) {
 
 // publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live。
 func (s *Server) publishSurvey(c *gin.Context) {
-	resp, err := s.surveys.Publish(c.Request.Context(), survey.PublishReq{ID: c.Param("id"), OwnerID: currentUserID(c)})
+	resp, err := s.surveys.Publish(c.Request.Context(), api.SurveyPublishReq{ID: c.Param("id")})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	// unchanged=true:草稿与当前对外版本一致,未造新版本(重发免空版)。前端据此提示「内容未变」。
@@ -84,8 +85,8 @@ func (s *Server) publishSurvey(c *gin.Context) {
 
 // closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。状态机守卫在 service。
 func (s *Server) closeSurvey(c *gin.Context) {
-	if _, err := s.surveys.Close(c.Request.Context(), survey.CloseReq{ID: c.Param("id"), OwnerID: currentUserID(c)}); err != nil {
-		renderError(c, err)
+	if _, err := s.surveys.Close(c.Request.Context(), api.SurveyCloseReq{ID: c.Param("id")}); err != nil {
+		render.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -93,8 +94,8 @@ func (s *Server) closeSurvey(c *gin.Context) {
 
 // reopenSurvey POST /api/surveys/:id/reopen —— 重新打开(closed → live)。守卫在 service。
 func (s *Server) reopenSurvey(c *gin.Context) {
-	if _, err := s.surveys.Reopen(c.Request.Context(), survey.ReopenReq{ID: c.Param("id"), OwnerID: currentUserID(c)}); err != nil {
-		renderError(c, err)
+	if _, err := s.surveys.Reopen(c.Request.Context(), api.SurveyReopenReq{ID: c.Param("id")}); err != nil {
+		render.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -109,9 +110,9 @@ type surveyStats struct {
 
 // surveyStats GET /api/surveys/:id/stats —— 问卷概览统计。归属校验。
 func (s *Server) surveyStats(c *gin.Context) {
-	st, err := s.surveys.Stats(c.Request.Context(), survey.StatsReq{ID: c.Param("id"), OwnerID: currentUserID(c)})
+	st, err := s.surveys.Stats(c.Request.Context(), api.SurveyStatsReq{ID: c.Param("id")})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, surveyStats{

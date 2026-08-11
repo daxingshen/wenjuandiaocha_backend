@@ -8,14 +8,14 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/lib/ratelimit"
-	"wenjuandiaocha_backend/internal/service/submission"
+	"wenjuandiaocha_backend/internal/server/http/render"
 )
 
 // submitLimiter:提交答卷限频。每 IP 平均 1 次/秒,突发 10。
@@ -23,9 +23,9 @@ var submitLimiter = ratelimit.New(1, 10)
 
 // getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 SurveySchema。
 func (s *Server) getPublicSurvey(c *gin.Context) {
-	resp, err := s.submissions.GetPublished(c.Request.Context(), submission.GetPublishedReq{ID: c.Param("id")})
+	resp, err := s.submissions.GetPublished(c.Request.Context(), api.GetPublishedReq{ID: c.Param("id")})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	// 快照本身就是 SurveySchema JSON,原样吐(前端无适配层)。
@@ -42,36 +42,29 @@ type submitReq struct {
 // submitAnswers POST /api/public/surveys/:id/answers —— 限频 + 权威校验 + 双写落库。
 func (s *Server) submitAnswers(c *gin.Context) {
 	if !submitLimiter.Allow(c.ClientIP()) {
-		fail(c, http.StatusTooManyRequests, "提交过于频繁,请稍后再试")
+		render.Fail(c, http.StatusTooManyRequests, "提交过于频繁,请稍后再试")
 		return
 	}
 
 	var req submitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		fail(c, http.StatusBadRequest, "请求体格式错误")
+		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
 		return
 	}
 
-	res, err := s.submissions.Submit(c.Request.Context(), submission.SubmitReq{
+	// ip/ua 已由全局 clientInfo 中间件注入 ctx metadata,submission service 从中采集存 meta。
+	res, err := s.submissions.Submit(c.Request.Context(), api.SubmitReq{
 		SurveyID: c.Param("id"),
 		Answers:  req.Answers,
 		Version:  req.Version,
-		Meta:     clientMeta(c),
 	})
 	if err != nil {
-		renderError(c, err)
+		render.Error(c, err)
 		return
 	}
 	if len(res.ValidationErrors) > 0 {
-		failValidation(c, res.ValidationErrors)
+		render.Validation(c, res.ValidationErrors)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "rows": res.Rows})
-}
-
-// clientMeta 采集防刷预留信息(ip/ua),存 responses.meta。
-func clientMeta(c *gin.Context) []byte {
-	m := map[string]any{"ip": c.ClientIP(), "ua": c.Request.UserAgent()}
-	b, _ := json.Marshal(m)
-	return b
 }
