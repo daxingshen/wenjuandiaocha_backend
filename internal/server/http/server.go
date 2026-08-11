@@ -14,16 +14,16 @@ import (
 // ProviderSet 供 wire 组装:提供 *Server。
 var ProviderSet = wire.NewSet(NewServer)
 
-// Server 承载 HTTP 依赖:各业务 manager + config。
+// Server 承载 HTTP 依赖:各业务 service 接口 + config。传输层持接口,不认识具体 Manager。
 type Server struct {
-	surveys     *survey.Manager
+	surveys     survey.Service
 	submissions *submission.Manager
 	auth        *svcauth.Manager
 	cfg         config.Config
 }
 
-// NewServer 建 Server,注入各 manager。
-func NewServer(surveys *survey.Manager, submissions *submission.Manager, auth *svcauth.Manager, cfg config.Config) *Server {
+// NewServer 建 Server,注入各 service。
+func NewServer(surveys survey.Service, submissions *submission.Manager, auth *svcauth.Manager, cfg config.Config) *Server {
 	return &Server{surveys: surveys, submissions: submissions, auth: auth, cfg: cfg}
 }
 
