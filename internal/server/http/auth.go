@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"wenjuandiaocha_backend/api"
+	svcauth "wenjuandiaocha_backend/internal/service/auth"
 )
 
 // userResp 对齐前端 AuthUser { id, name, level }。
@@ -23,30 +24,30 @@ func (s *Server) login(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "账号或密码缺失")
 		return
 	}
-	u, token, _, err := s.auth.Login(c.Request.Context(), req.GetAccount(), req.GetPassword())
+	resp, err := s.auth.Login(c.Request.Context(), svcauth.LoginReq{Account: req.GetAccount(), Password: req.GetPassword()})
 	if err != nil {
 		renderError(c, err)
 		return
 	}
-	s.setSessionCookie(c, token)
-	c.JSON(http.StatusOK, userResp{ID: u.ID, Name: u.Name, Level: u.Level})
+	s.setSessionCookie(c, resp.Token)
+	c.JSON(http.StatusOK, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
 }
 
 func (s *Server) logout(c *gin.Context) {
 	if token, err := c.Cookie(sessionCookie); err == nil && token != "" {
-		s.auth.Logout(c.Request.Context(), token)
+		_, _ = s.auth.Logout(c.Request.Context(), svcauth.LogoutReq{Token: token})
 	}
 	s.clearSessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (s *Server) me(c *gin.Context) {
-	u, err := s.auth.Me(c.Request.Context(), currentUserID(c))
+	resp, err := s.auth.Me(c.Request.Context(), svcauth.MeReq{UserID: currentUserID(c)})
 	if err != nil {
 		renderError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, userResp{ID: u.ID, Name: u.Name, Level: u.Level})
+	c.JSON(http.StatusOK, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
 }
 
 func (s *Server) setSessionCookie(c *gin.Context, token string) {

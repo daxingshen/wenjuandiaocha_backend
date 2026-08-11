@@ -52,7 +52,7 @@ func statusOf(t *testing.T, err error) int {
 func TestLogin_AccountNotFound_Unauthorized(t *testing.T) {
 	f := &fakeStore{userErr: dao.ErrNotFound}
 	m := New(f, time.Hour)
-	_, _, _, err := m.Login(context.Background(), "ghost", "pw")
+	_, err := m.Login(context.Background(), LoginReq{Account: "ghost", Password: "pw"})
 	if got := statusOf(t, err); got != http.StatusUnauthorized {
 		t.Fatalf("账号不存在状态 = %d, want 401", got)
 	}
@@ -64,11 +64,11 @@ func TestLogin_WrongPassword_SameAsUnknownAccount(t *testing.T) {
 	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "n", Level: "admin"}}
 	m := New(f, time.Hour)
 
-	_, _, _, errWrong := m.Login(context.Background(), "alice", "wrong")
+	_, errWrong := m.Login(context.Background(), LoginReq{Account: "alice", Password: "wrong"})
 	sWrong, mWrong, _ := ecode.FromError(errWrong)
 
 	f2 := &fakeStore{userErr: dao.ErrNotFound}
-	_, _, _, errGhost := New(f2, time.Hour).Login(context.Background(), "ghost", "wrong")
+	_, errGhost := New(f2, time.Hour).Login(context.Background(), LoginReq{Account: "ghost", Password: "wrong"})
 	sGhost, mGhost, _ := ecode.FromError(errGhost)
 
 	if sWrong != http.StatusUnauthorized || sWrong != sGhost || mWrong != mGhost {
@@ -82,7 +82,7 @@ func TestLogin_WrongPassword_SameAsUnknownAccount(t *testing.T) {
 // 缺账号 → 400。
 func TestLogin_EmptyAccount_BadRequest(t *testing.T) {
 	m := New(&fakeStore{}, time.Hour)
-	_, _, _, err := m.Login(context.Background(), "", "pw")
+	_, err := m.Login(context.Background(), LoginReq{Account: "", Password: "pw"})
 	if got := statusOf(t, err); got != http.StatusBadRequest {
 		t.Fatalf("空账号状态 = %d, want 400", got)
 	}
@@ -93,12 +93,12 @@ func TestLogin_Success_CreatesSession(t *testing.T) {
 	hash, _ := authlib.HashPassword("pw")
 	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "Alice", Level: "admin"}}
 	m := New(f, time.Hour)
-	u, token, _, err := m.Login(context.Background(), "alice", "pw")
+	resp, err := m.Login(context.Background(), LoginReq{Account: "alice", Password: "pw"})
 	if err != nil {
 		t.Fatalf("正确账密应成功,得到 %v", err)
 	}
-	if u.ID != "u1" || u.Name != "Alice" || token == "" || !f.created {
-		t.Fatalf("登录结果异常: u=%+v token=%q created=%v", u, token, f.created)
+	if resp.User.ID != "u1" || resp.User.Name != "Alice" || resp.Token == "" || !f.created {
+		t.Fatalf("登录结果异常: u=%+v token=%q created=%v", resp.User, resp.Token, f.created)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestLogin_Success_CreatesSession(t *testing.T) {
 func TestValidateSession_Expired_DeletesAnd401(t *testing.T) {
 	f := &fakeStore{sessUserID: "u1", sessExpires: time.Now().Add(-time.Minute)}
 	m := New(f, time.Hour)
-	_, err := m.ValidateSession(context.Background(), "tok")
+	_, err := m.ValidateSession(context.Background(), ValidateSessionReq{Token: "tok"})
 	if got := statusOf(t, err); got != http.StatusUnauthorized {
 		t.Fatalf("过期会话状态 = %d, want 401", got)
 	}
@@ -119,7 +119,7 @@ func TestValidateSession_Expired_DeletesAnd401(t *testing.T) {
 func TestValidateSession_NotFound_401(t *testing.T) {
 	f := &fakeStore{sessErr: dao.ErrNotFound}
 	m := New(f, time.Hour)
-	_, err := m.ValidateSession(context.Background(), "tok")
+	_, err := m.ValidateSession(context.Background(), ValidateSessionReq{Token: "tok"})
 	if got := statusOf(t, err); got != http.StatusUnauthorized {
 		t.Fatalf("无效会话状态 = %d, want 401", got)
 	}
@@ -129,9 +129,9 @@ func TestValidateSession_NotFound_401(t *testing.T) {
 func TestValidateSession_Valid_ReturnsUID(t *testing.T) {
 	f := &fakeStore{sessUserID: "u1", sessExpires: time.Now().Add(time.Hour)}
 	m := New(f, time.Hour)
-	uid, err := m.ValidateSession(context.Background(), "tok")
-	if err != nil || uid != "u1" {
-		t.Fatalf("有效会话应返回 u1,得到 uid=%q err=%v", uid, err)
+	resp, err := m.ValidateSession(context.Background(), ValidateSessionReq{Token: "tok"})
+	if err != nil || resp.UserID != "u1" {
+		t.Fatalf("有效会话应返回 u1,得到 uid=%q err=%v", resp.UserID, err)
 	}
 }
 

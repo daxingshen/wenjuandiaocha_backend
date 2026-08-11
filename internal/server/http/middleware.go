@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	svcauth "wenjuandiaocha_backend/internal/service/auth"
 )
 
 const (
@@ -85,12 +87,12 @@ func (s *Server) requireAuth(c *gin.Context) {
 		fail(c, http.StatusUnauthorized, "未登录")
 		return
 	}
-	uid, verr := s.auth.ValidateSession(c.Request.Context(), token)
+	resp, verr := s.auth.ValidateSession(c.Request.Context(), svcauth.ValidateSessionReq{Token: token})
 	if verr != nil {
 		renderError(c, verr)
 		return
 	}
-	c.Set(ctxUserID, uid)
+	c.Set(ctxUserID, resp.UserID)
 	c.Next()
 }
 

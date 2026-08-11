@@ -18,12 +18,12 @@ var ProviderSet = wire.NewSet(NewServer)
 type Server struct {
 	surveys     survey.Service
 	submissions submission.Service
-	auth        *svcauth.Manager
+	auth        svcauth.Service
 	cfg         config.Config
 }
 
 // NewServer 建 Server,注入各 service。
-func NewServer(surveys survey.Service, submissions submission.Service, auth *svcauth.Manager, cfg config.Config) *Server {
+func NewServer(surveys survey.Service, submissions submission.Service, auth svcauth.Service, cfg config.Config) *Server {
 	return &Server{surveys: surveys, submissions: submissions, auth: auth, cfg: cfg}
 }
 
