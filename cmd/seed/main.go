@@ -12,7 +12,7 @@ import (
 
 	"wenjuandiaocha_backend/internal/auth"
 	"wenjuandiaocha_backend/internal/config"
-	"wenjuandiaocha_backend/internal/store"
+	"wenjuandiaocha_backend/internal/dao"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
-	st := store.New(pool)
+	st := dao.New(pool)
 
 	// 幂等:已存在则跳过。
 	if _, err := st.GetUserByAccount(ctx, account); err == nil {
@@ -49,7 +49,7 @@ func main() {
 		slog.Error("密码哈希失败", "err", err)
 		os.Exit(1)
 	}
-	u := store.User{ID: "u_" + randSuffix(), Account: account, PasswordHash: hash, Name: name, Level: level}
+	u := dao.User{ID: "u_" + randSuffix(), Account: account, PasswordHash: hash, Name: name, Level: level}
 	if err := st.CreateUser(ctx, u); err != nil {
 		slog.Error("建账号失败", "err", err)
 		os.Exit(1)

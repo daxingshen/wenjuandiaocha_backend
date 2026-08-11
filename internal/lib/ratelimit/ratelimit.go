@@ -1,0 +1,49 @@
+// Package ratelimit 提供极简内存令牌桶,按 key(如 IP)限频。
+// 本轮防滥用够用;分布式/持久化限频延后。
+package ratelimit
+
+import (
+	"sync"
+	"time"
+)
+
+type tokenBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// Limiter 是按 key 分桶的内存令牌桶。进程内存态,非分布式。
+type Limiter struct {
+	mu       sync.Mutex
+	buckets  map[string]*tokenBucket
+	rate     float64 // 每秒补充令牌
+	capacity float64 // 桶容量(突发上限)
+}
+
+// New 建令牌桶:ratePerSec 每秒补充速率,capacity 突发上限。
+func New(ratePerSec, capacity float64) *Limiter {
+	return &Limiter{buckets: map[string]*tokenBucket{}, rate: ratePerSec, capacity: capacity}
+}
+
+// Allow 消耗一个令牌;无令牌返回 false。
+func (l *Limiter) Allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	b, ok := l.buckets[key]
+	if !ok {
+		l.buckets[key] = &tokenBucket{tokens: l.capacity - 1, last: now}
+		return true
+	}
+	// 补充令牌
+	b.tokens += now.Sub(b.last).Seconds() * l.rate
+	if b.tokens > l.capacity {
+		b.tokens = l.capacity
+	}
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}

@@ -1,4 +1,4 @@
-// 星卷后端服务入口。装配层:读 config → 连 pg → 建 store → 挂 router → 起服务。
+// 星卷后端服务入口。装配层:读 config → 连 pg → di.InitServer(wire 组装) → 起服务。
 package main
 
 import (
@@ -10,9 +10,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"wenjuandiaocha_backend/internal/config"
-	xhttp "wenjuandiaocha_backend/internal/http"
+	"wenjuandiaocha_backend/internal/di"
 	"wenjuandiaocha_backend/internal/domain/qtype"
-	"wenjuandiaocha_backend/internal/store"
 )
 
 func main() {
@@ -40,8 +39,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	st := store.New(pool)
-	srv := xhttp.NewServer(st, cfg)
+	// wire 组装 pool 下游依赖(dao → 3 managers → http.Server);pool 生命周期留本函数。
+	srv := di.InitServer(pool, cfg)
 
 	slog.Info("星卷后端启动", "addr", cfg.HTTPAddr)
 	if err := srv.Router().Run(cfg.HTTPAddr); err != nil {

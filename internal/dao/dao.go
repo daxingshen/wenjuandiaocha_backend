@@ -1,6 +1,6 @@
-// store 是数据访问门面:持有 pgxpool,把 sqlc 生成的原子查询(gen 包)组合成业务方法。
-// 事务(答卷双写、发布快照)在此手写;单条 SQL 交 sqlc。http 层只认识本包方法,不碰 gen/pgx。
-package store
+// dao 是数据访问门面:持有 pgxpool,把 sqlc 生成的原子查询(gen 包)组合成业务方法。
+// 事务(答卷双写、发布快照)在此手写;单条 SQL 交 sqlc。上层只认识本包方法,不碰 gen/pgx。
+package dao
 
 import (
 	"context"
@@ -9,15 +9,19 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/google/wire"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wenjuandiaocha_backend/internal/dao/gen"
 	"wenjuandiaocha_backend/internal/domain"
-	"wenjuandiaocha_backend/internal/store/gen"
 )
 
 // ErrNotFound 统一的「查无」错误,http 层据此回 404。
 var ErrNotFound = errors.New("not found")
+
+// ProviderSet 供 wire 组装:从 *pgxpool.Pool 建 *Store。
+var ProviderSet = wire.NewSet(New)
 
 // Store 数据访问门面。
 type Store struct {

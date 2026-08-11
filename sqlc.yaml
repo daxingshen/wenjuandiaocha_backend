@@ -2,11 +2,11 @@ version: "2"
 sql:
   - engine: "postgresql"
     schema: "db/migrations"          # 与 goose 迁移同源:sqlc 从建表 SQL 推列类型
-    queries: "internal/store/queries"
+    queries: "internal/dao/queries"
     gen:
       go:
         package: "gen"
-        out: "internal/store/gen"
+        out: "internal/dao/gen"
         sql_package: "pgx/v5"
         emit_json_tags: false
         emit_pointers_for_null_types: true
