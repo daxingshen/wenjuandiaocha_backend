@@ -5,17 +5,17 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"wenjuandiaocha_backend/internal/config"
-	"wenjuandiaocha_backend/internal/store"
+	"wenjuandiaocha_backend/internal/dao"
 )
 
 // Server 承载 HTTP 依赖。
 type Server struct {
-	store *store.Store
+	store *dao.Store
 	cfg   config.Config
 }
 
 // NewServer 建 Server。
-func NewServer(st *store.Store, cfg config.Config) *Server {
+func NewServer(st *dao.Store, cfg config.Config) *Server {
 	return &Server{store: st, cfg: cfg}
 }
 

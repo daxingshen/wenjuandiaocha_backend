@@ -13,16 +13,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
-	"wenjuandiaocha_backend/internal/store"
+	xid "wenjuandiaocha_backend/internal/lib/id"
+	"wenjuandiaocha_backend/internal/lib/ratelimit"
 )
+
+// submitLimiter:提交答卷限频。每 IP 平均 1 次/秒,突发 10。
+var submitLimiter = ratelimit.New(1, 10)
 
 // getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 SurveySchema。
 func (s *Server) getPublicSurvey(c *gin.Context) {
 	id := c.Param("id")
 	schemaJSON, err := s.store.GetPublishedSchema(c.Request.Context(), id)
 	if err != nil {
-		if err == store.ErrNotFound {
+		if err == dao.ErrNotFound {
 			fail(c, http.StatusNotFound, "问卷不存在或未发布")
 			return
 		}
@@ -44,7 +49,7 @@ type submitReq struct {
 func (s *Server) submitAnswers(c *gin.Context) {
 	id := c.Param("id")
 
-	if !submitLimiter.allow(c.ClientIP()) {
+	if !submitLimiter.Allow(c.ClientIP()) {
 		fail(c, http.StatusTooManyRequests, "提交过于频繁,请稍后再试")
 		return
 	}
@@ -58,7 +63,7 @@ func (s *Server) submitAnswers(c *gin.Context) {
 	// 收答前置:问卷必须存在且 status=live(close 后停收,与 GetPublishedSchema 的 live 过滤语义一致)。
 	meta, err := s.store.GetSurvey(c.Request.Context(), id)
 	if err != nil {
-		if err == store.ErrNotFound {
+		if err == dao.ErrNotFound {
 			fail(c, http.StatusNotFound, "问卷不存在或未发布")
 			return
 		}
@@ -77,7 +82,7 @@ func (s *Server) submitAnswers(c *gin.Context) {
 	if req.Version > 0 {
 		schemaJSON, err = s.store.GetVersionSchema(c.Request.Context(), id, req.Version)
 		if err != nil {
-			if err == store.ErrNotFound {
+			if err == dao.ErrNotFound {
 				fail(c, http.StatusBadRequest, "问卷版本已失效,请刷新后重新作答")
 				return
 			}
@@ -87,7 +92,7 @@ func (s *Server) submitAnswers(c *gin.Context) {
 	} else {
 		schemaJSON, err = s.store.GetPublishedSchema(c.Request.Context(), id)
 		if err != nil {
-			if err == store.ErrNotFound {
+			if err == dao.ErrNotFound {
 				fail(c, http.StatusNotFound, "问卷不存在或未发布")
 				return
 			}
@@ -113,7 +118,7 @@ func (s *Server) submitAnswers(c *gin.Context) {
 	rawJSON, _ := json.Marshal(req.Answers)
 	metaJSON := clientMeta(c)
 
-	respID := newID()
+	respID := xid.New()
 	if err := s.store.SaveSubmission(c.Request.Context(), respID, id, schema.Version, rawJSON, metaJSON, rows); err != nil {
 		s.storeError(c, err)
 		return

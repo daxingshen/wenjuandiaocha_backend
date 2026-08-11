@@ -8,8 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
-	"wenjuandiaocha_backend/internal/store"
+	"wenjuandiaocha_backend/internal/lib/id"
 )
 
 // surveyListItem 对齐前端 SurveyListItem { id, title, type, updatedAt }。
@@ -42,7 +43,7 @@ func (s *Server) listSurveys(c *gin.Context) {
 // 空 body 回落最小 schema(仍支持直接建空)。id 一律由后端分配并覆盖进 schema。
 // 与 updateSurvey 一致:首存只落草稿、不做逻辑求值,发布时才严格校验。
 func (s *Server) createSurvey(c *gin.Context) {
-	id := newID()
+	id := id.New()
 	body, _ := c.GetRawData()
 
 	var schema domain.SurveySchema
@@ -188,15 +189,15 @@ func (s *Server) surveyStats(c *gin.Context) {
 }
 
 // ownedSurvey 取 :id 问卷并校验归属;非本人 → 404(不泄露存在性),已写响应时返回 err。
-func (s *Server) ownedSurvey(c *gin.Context) (store.SurveyMeta, error) {
+func (s *Server) ownedSurvey(c *gin.Context) (dao.SurveyMeta, error) {
 	meta, err := s.store.GetSurvey(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		s.storeError(c, err)
-		return store.SurveyMeta{}, err
+		return dao.SurveyMeta{}, err
 	}
 	if meta.OwnerID != currentUserID(c) {
 		fail(c, http.StatusNotFound, "不存在")
-		return store.SurveyMeta{}, errForbidden
+		return dao.SurveyMeta{}, errForbidden
 	}
 	return meta, nil
 }

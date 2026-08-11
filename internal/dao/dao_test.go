@@ -1,6 +1,6 @@
 // schemaEqualIgnoringVersion 的单测:重发免空版的判等核心。
 // 假阴性(草稿变了却判 equal)= 静默吞掉真实编辑,是最严重的坑,故逐个反例锁死。
-package store
+package dao
 
 import "testing"
 

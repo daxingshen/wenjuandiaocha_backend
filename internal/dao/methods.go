@@ -1,12 +1,12 @@
 // store 的非事务业务方法:用户 / 会话 / 问卷 CRUD / 发布快照读取。
 // 直接委托 sqlc 生成的查询,归一「查无」错误。
-package store
+package dao
 
 import (
 	"context"
 	"time"
 
-	"wenjuandiaocha_backend/internal/store/gen"
+	"wenjuandiaocha_backend/internal/dao/gen"
 )
 
 // ---------- 用户 ----------

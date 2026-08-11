@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"wenjuandiaocha_backend/internal/store"
+	"wenjuandiaocha_backend/internal/dao"
 )
 
 const (
@@ -105,9 +105,9 @@ func currentUserID(c *gin.Context) string {
 	return c.GetString(ctxUserID)
 }
 
-// ensureNotFound 把 store.ErrNotFound 映射成 404,其余 500。
+// ensureNotFound 把 dao.ErrNotFound 映射成 404,其余 500。
 func (s *Server) storeError(c *gin.Context, err error) {
-	if err == store.ErrNotFound {
+	if err == dao.ErrNotFound {
 		fail(c, http.StatusNotFound, "不存在")
 		return
 	}

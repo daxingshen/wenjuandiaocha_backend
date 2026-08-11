@@ -10,9 +10,9 @@ import (
 	"github.com/joho/godotenv"
 
 	"wenjuandiaocha_backend/internal/config"
-	xhttp "wenjuandiaocha_backend/internal/http"
+	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain/qtype"
-	"wenjuandiaocha_backend/internal/store"
+	xhttp "wenjuandiaocha_backend/internal/server/http"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	st := store.New(pool)
+	st := dao.New(pool)
 	srv := xhttp.NewServer(st, cfg)
 
 	slog.Info("星卷后端启动", "addr", cfg.HTTPAddr)
