@@ -57,7 +57,7 @@ const emptySchema = `{"id":"s1","type":"survey","title":"t","version":3,"questio
 func TestSubmit_NotLive_Returns404(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "closed"}}
 	m := New(f)
-	_, _, err := m.Submit(context.Background(), "s1", domain.Answers{}, 0, nil)
+	_, err := m.Submit(context.Background(), SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if got := statusOf(t, err); got != http.StatusNotFound {
 		t.Fatalf("closed 提交状态 = %d, want 404", got)
 	}
@@ -67,7 +67,7 @@ func TestSubmit_NotLive_Returns404(t *testing.T) {
 func TestSubmit_SurveyNotFound_Returns404(t *testing.T) {
 	f := &fakeStore{metaErr: dao.ErrNotFound}
 	m := New(f)
-	_, _, err := m.Submit(context.Background(), "s1", domain.Answers{}, 0, nil)
+	_, err := m.Submit(context.Background(), SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if got := statusOf(t, err); got != http.StatusNotFound {
 		t.Fatalf("查无提交状态 = %d, want 404", got)
 	}
@@ -77,9 +77,9 @@ func TestSubmit_SurveyNotFound_Returns404(t *testing.T) {
 func TestSubmit_VersionPinned_UsesVersionSchema(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), versionJSON: []byte(emptySchema)}
 	m := New(f)
-	res, verrs, err := m.Submit(context.Background(), "s1", domain.Answers{}, 3, nil)
-	if err != nil || len(verrs) > 0 {
-		t.Fatalf("空 schema 提交应成功: err=%v verrs=%v", err, verrs)
+	res, err := m.Submit(context.Background(), SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Version: 3})
+	if err != nil || len(res.ValidationErrors) > 0 {
+		t.Fatalf("空 schema 提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
 	}
 	if !f.versionCalled {
 		t.Fatal("version>0 应调用 GetVersionSchema")
@@ -87,14 +87,13 @@ func TestSubmit_VersionPinned_UsesVersionSchema(t *testing.T) {
 	if !f.saveCalled || f.savedVersion != 3 {
 		t.Fatalf("应落库且版本锚定为快照 version=3,得到 saved=%v ver=%d", f.saveCalled, f.savedVersion)
 	}
-	_ = res
 }
 
 // 版本锚定:version>0 但该版失效 → 400 引导刷新。
 func TestSubmit_VersionStale_Returns400(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), versionErr: dao.ErrNotFound}
 	m := New(f)
-	_, _, err := m.Submit(context.Background(), "s1", domain.Answers{}, 9, nil)
+	_, err := m.Submit(context.Background(), SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Version: 9})
 	if got := statusOf(t, err); got != http.StatusBadRequest {
 		t.Fatalf("失效版本提交状态 = %d, want 400", got)
 	}
@@ -104,9 +103,9 @@ func TestSubmit_VersionStale_Returns400(t *testing.T) {
 func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, verrs, err := m.Submit(context.Background(), "s1", domain.Answers{}, 0, nil)
-	if err != nil || len(verrs) > 0 {
-		t.Fatalf("回落发布版提交应成功: err=%v verrs=%v", err, verrs)
+	res, err := m.Submit(context.Background(), SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if err != nil || len(res.ValidationErrors) > 0 {
+		t.Fatalf("回落发布版提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
 	}
 	if f.versionCalled {
 		t.Fatal("version==0 不应调用 GetVersionSchema")
@@ -120,7 +119,7 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 func TestGetPublished_NotFound_Returns404(t *testing.T) {
 	f := &fakeStore{publishedErr: dao.ErrNotFound}
 	m := New(f)
-	_, err := m.GetPublished(context.Background(), "s1")
+	_, err := m.GetPublished(context.Background(), GetPublishedReq{ID: "s1"})
 	if got := statusOf(t, err); got != http.StatusNotFound {
 		t.Fatalf("未发布 GetPublished 状态 = %d, want 404", got)
 	}

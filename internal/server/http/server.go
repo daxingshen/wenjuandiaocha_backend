@@ -17,13 +17,13 @@ var ProviderSet = wire.NewSet(NewServer)
 // Server 承载 HTTP 依赖:各业务 service 接口 + config。传输层持接口,不认识具体 Manager。
 type Server struct {
 	surveys     survey.Service
-	submissions *submission.Manager
+	submissions submission.Service
 	auth        *svcauth.Manager
 	cfg         config.Config
 }
 
 // NewServer 建 Server,注入各 service。
-func NewServer(surveys survey.Service, submissions *submission.Manager, auth *svcauth.Manager, cfg config.Config) *Server {
+func NewServer(surveys survey.Service, submissions submission.Service, auth *svcauth.Manager, cfg config.Config) *Server {
 	return &Server{surveys: surveys, submissions: submissions, auth: auth, cfg: cfg}
 }
 

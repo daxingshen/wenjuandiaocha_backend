@@ -15,6 +15,7 @@ import (
 
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/lib/ratelimit"
+	"wenjuandiaocha_backend/internal/service/submission"
 )
 
 // submitLimiter:提交答卷限频。每 IP 平均 1 次/秒,突发 10。
@@ -22,13 +23,13 @@ var submitLimiter = ratelimit.New(1, 10)
 
 // getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 SurveySchema。
 func (s *Server) getPublicSurvey(c *gin.Context) {
-	schemaJSON, err := s.submissions.GetPublished(c.Request.Context(), c.Param("id"))
+	resp, err := s.submissions.GetPublished(c.Request.Context(), submission.GetPublishedReq{ID: c.Param("id")})
 	if err != nil {
 		renderError(c, err)
 		return
 	}
 	// 快照本身就是 SurveySchema JSON,原样吐(前端无适配层)。
-	c.Data(http.StatusOK, "application/json; charset=utf-8", schemaJSON)
+	c.Data(http.StatusOK, "application/json; charset=utf-8", resp.Schema)
 }
 
 type submitReq struct {
@@ -51,13 +52,18 @@ func (s *Server) submitAnswers(c *gin.Context) {
 		return
 	}
 
-	res, verrs, err := s.submissions.Submit(c.Request.Context(), c.Param("id"), req.Answers, req.Version, clientMeta(c))
+	res, err := s.submissions.Submit(c.Request.Context(), submission.SubmitReq{
+		SurveyID: c.Param("id"),
+		Answers:  req.Answers,
+		Version:  req.Version,
+		Meta:     clientMeta(c),
+	})
 	if err != nil {
 		renderError(c, err)
 		return
 	}
-	if len(verrs) > 0 {
-		failValidation(c, verrs)
+	if len(res.ValidationErrors) > 0 {
+		failValidation(c, res.ValidationErrors)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "rows": res.Rows})
