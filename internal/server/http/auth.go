@@ -1,13 +1,10 @@
-// 鉴权端点:login / logout / me。session 存 DB,token 走 HttpOnly cookie。
+// 鉴权端点:login / logout / me。业务在 service/auth;cookie 下发是传输关切,留在本层。
 package http
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-
-	"wenjuandiaocha_backend/internal/auth"
 )
 
 type loginReq struct {
@@ -24,24 +21,13 @@ type userResp struct {
 
 func (s *Server) login(c *gin.Context) {
 	var req loginReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.Account == "" {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "账号或密码缺失")
 		return
 	}
-	u, err := s.store.GetUserByAccount(c.Request.Context(), req.Account)
-	if err != nil || !auth.CheckPassword(u.PasswordHash, req.Password) {
-		// 不区分「账号不存在」与「密码错」,避免账号枚举。
-		fail(c, http.StatusUnauthorized, "账号或密码错误")
-		return
-	}
-	token, err := auth.NewSessionToken()
+	u, token, _, err := s.auth.Login(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "内部错误")
-		return
-	}
-	expires := time.Now().Add(s.cfg.SessionTTL)
-	if err := s.store.CreateSession(c.Request.Context(), token, u.ID, expires); err != nil {
-		s.storeError(c, err)
+		renderError(c, err)
 		return
 	}
 	s.setSessionCookie(c, token)
@@ -50,16 +36,16 @@ func (s *Server) login(c *gin.Context) {
 
 func (s *Server) logout(c *gin.Context) {
 	if token, err := c.Cookie(sessionCookie); err == nil && token != "" {
-		_ = s.store.DeleteSession(c.Request.Context(), token)
+		s.auth.Logout(c.Request.Context(), token)
 	}
 	s.clearSessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (s *Server) me(c *gin.Context) {
-	u, err := s.store.GetUserByID(c.Request.Context(), currentUserID(c))
+	u, err := s.auth.Me(c.Request.Context(), currentUserID(c))
 	if err != nil {
-		s.storeError(c, err)
+		renderError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, userResp{ID: u.ID, Name: u.Name, Level: u.Level})

@@ -13,6 +13,9 @@ import (
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain/qtype"
 	xhttp "wenjuandiaocha_backend/internal/server/http"
+	svcauth "wenjuandiaocha_backend/internal/service/auth"
+	"wenjuandiaocha_backend/internal/service/submission"
+	"wenjuandiaocha_backend/internal/service/survey"
 )
 
 func main() {
@@ -41,7 +44,10 @@ func main() {
 	}
 
 	st := dao.New(pool)
-	srv := xhttp.NewServer(st, cfg)
+	surveys := survey.New(st)
+	submissions := submission.New(st)
+	auth := svcauth.New(st, cfg.SessionTTL)
+	srv := xhttp.NewServer(surveys, submissions, auth, cfg)
 
 	slog.Info("星卷后端启动", "addr", cfg.HTTPAddr)
 	if err := srv.Router().Run(cfg.HTTPAddr); err != nil {

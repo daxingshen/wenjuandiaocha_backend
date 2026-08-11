@@ -1,22 +1,26 @@
-// http 层装配:Server 持有依赖(store + config),挂路由。
+// http 层装配:Server 持有各 service manager,挂路由。传输层只做 bind→调 service→render。
 package http
 
 import (
 	"github.com/gin-gonic/gin"
 
 	"wenjuandiaocha_backend/internal/config"
-	"wenjuandiaocha_backend/internal/dao"
+	svcauth "wenjuandiaocha_backend/internal/service/auth"
+	"wenjuandiaocha_backend/internal/service/submission"
+	"wenjuandiaocha_backend/internal/service/survey"
 )
 
-// Server 承载 HTTP 依赖。
+// Server 承载 HTTP 依赖:各业务 manager + config。
 type Server struct {
-	store *dao.Store
-	cfg   config.Config
+	surveys     *survey.Manager
+	submissions *submission.Manager
+	auth        *svcauth.Manager
+	cfg         config.Config
 }
 
-// NewServer 建 Server。
-func NewServer(st *dao.Store, cfg config.Config) *Server {
-	return &Server{store: st, cfg: cfg}
+// NewServer 建 Server,注入各 manager。
+func NewServer(surveys *survey.Manager, submissions *submission.Manager, auth *svcauth.Manager, cfg config.Config) *Server {
+	return &Server{surveys: surveys, submissions: submissions, auth: auth, cfg: cfg}
 }
 
 // Router 构建 gin 引擎:全局中间件 + 路由分组。

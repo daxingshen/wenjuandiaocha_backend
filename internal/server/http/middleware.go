@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
-	"wenjuandiaocha_backend/internal/dao"
 )
 
 const (
-	ctxUserID    = "uid"
+	ctxUserID     = "uid"
 	sessionCookie = "sid"
 )
 
@@ -80,20 +78,16 @@ func cors() gin.HandlerFunc {
 }
 
 // requireAuth 读 session cookie → 校验 → 注入 userID;失败 401。
+// 空 token 是传输层判定(未登录);token 有效性交 auth manager。
 func (s *Server) requireAuth(c *gin.Context) {
 	token, err := c.Cookie(sessionCookie)
 	if err != nil || token == "" {
 		fail(c, http.StatusUnauthorized, "未登录")
 		return
 	}
-	uid, expires, err := s.store.GetSession(c.Request.Context(), token)
-	if err != nil {
-		fail(c, http.StatusUnauthorized, "会话无效")
-		return
-	}
-	if time.Now().After(expires) {
-		_ = s.store.DeleteSession(c.Request.Context(), token)
-		fail(c, http.StatusUnauthorized, "会话已过期")
+	uid, verr := s.auth.ValidateSession(c.Request.Context(), token)
+	if verr != nil {
+		renderError(c, verr)
 		return
 	}
 	c.Set(ctxUserID, uid)
@@ -103,14 +97,4 @@ func (s *Server) requireAuth(c *gin.Context) {
 // currentUserID 取中间件注入的用户 id。
 func currentUserID(c *gin.Context) string {
 	return c.GetString(ctxUserID)
-}
-
-// ensureNotFound 把 dao.ErrNotFound 映射成 404,其余 500。
-func (s *Server) storeError(c *gin.Context, err error) {
-	if err == dao.ErrNotFound {
-		fail(c, http.StatusNotFound, "不存在")
-		return
-	}
-	slog.Error("store error", "err", err, "path", c.Request.URL.Path)
-	fail(c, http.StatusInternalServerError, "内部错误")
 }
