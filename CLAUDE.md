@@ -25,6 +25,7 @@ Go 1.25 · gin · sqlc + pgx/v5 · goose(迁移)· PostgreSQL 17 · bcrypt + DB-
 3. **永不信任客户端**:public 提交端点必须用后端载入的**发布版 schema** 完整重跑 Evaluate→Validate→Normalize;客户端传的隐藏题答案由后端求值剔除,落库规范化行以后端为准(frontend.md 决策 6 安全底线)。
 4. **必答判断双层**:multi-choice / matrix-single 的 required 判断在各自 handler 内(空数组/空对象在通用层算「已答」),不在通用 ValidateSurvey。照抄前端 handler 结构,别只在通用层判 required。
 5. **jsonb 整存 schema**:问卷整份 SurveySchema 存 `surveys.draft_schema` / `survey_versions.schema`(jsonb)。dao 层当 []byte 转发,不解析;只有 domain 在求值时解析。加题型零 DDL。
+6. **service I/O 一处定义、传输无关**:业务输入输出类型只在各 service 包定义(`XReq`/`XResp`),`Service` 接口是契约;传输层(现 http、未来 gRPC)只做「本传输格式 ↔ service 类型」翻译,**不得另立业务 I/O**。调用方身份(ownerID)由传输层取得后填入 Req,不进 domain/service 的隐式 ctx。HTTP 响应 struct 的 json tag(逐字节对齐前端)属传输层关切,留 server/http。schema 主体仍以 `[]byte` 穿过 service,不拆字段。
 
 ## 仓库结构
 
@@ -38,7 +39,8 @@ cmd/seed/         seed 账号(读 .env)
 internal/
   domain/         ★纯函数:schema.go / logic.go / validate.go / normalize.go / qtype/
   server/http/    gin handler(bind→调 service→render)+ 中间件 + render
-  service/        业务层:survey/(CRUD+发布+状态机守卫+归属) submission/(提交编排) auth/(登录/会话)
+  service/        业务层:survey/ submission/ auth/。每包暴露 Service 接口 + 统一 Req/Resp
+                  (Method(ctx,XReq)(XResp,err)),I/O 类型一处定义;传输层持接口、只做格式翻译
   dao/            queries/*.sql(手写)+ gen/(sqlc 生成,勿手改)+ dao.go(门面+事务)
   di/             google/wire 组装:wire.go(wireinject)+ wire_gen.go(生成,勿手改)
   ecode/          业务错误码(带 HTTP 状态);service 返回,server/http 用 FromError 映射
