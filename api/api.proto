@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+// package api 定义星卷后端的信封级契约。
+// 只建模「信封」端点(登录/发布/统计/列表项/通用 ok);整份 SurveySchema 主体
+// 仍作为原始 JSON([]byte)透传,不进 proto(polymorphic jsonb,交 domain 解析)。
+// 字段名严格对齐前端 packages/engine/src/schema.ts(前端无适配层)。
+package api;
+
+option go_package = "wenjuandiaocha_backend/api;api";
+
+// LoginReq 登录请求。
+message LoginReq {
+  string account = 1;
+  string password = 2;
+}
+
+// UserResp 对齐前端 AuthUser { id, name, level }。
+message UserResp {
+  string id = 1;
+  string name = 2;
+  string level = 3;
+}
+
+// SurveyListItem 对齐前端 SurveyListItem { id, title, type, status, updatedAt }。
+message SurveyListItem {
+  string id = 1;
+  string title = 2;
+  string type = 3;
+  string status = 4;
+  string updatedAt = 5;
+}
+
+// SurveyStats 问卷概览:状态 + 已发布版本(可空)+ 答卷数。
+message SurveyStats {
+  string status = 1;
+  optional int32 publishedVersion = 2;
+  int32 responseCount = 3;
+}
+
+// PublishResp 发布结果:版本号 + 是否免空版(内容未变)。
+message PublishResp {
+  bool ok = 1;
+  int32 version = 2;
+  bool unchanged = 3;
+}
+
+// SubmitResp 提交结果:落库规范化行数。
+message SubmitResp {
+  bool ok = 1;
+  int32 rows = 2;
+}

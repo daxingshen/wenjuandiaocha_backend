@@ -5,14 +5,12 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"wenjuandiaocha_backend/api"
 )
 
-type loginReq struct {
-	Account  string `json:"account"`
-	Password string `json:"password"`
-}
-
 // userResp 对齐前端 AuthUser { id, name, level }。
+// 响应体手写(不用 pb 生成物):pb 字段带 omitempty 会丢零值,破坏「对外逐字节不变」。
 type userResp struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -20,12 +18,12 @@ type userResp struct {
 }
 
 func (s *Server) login(c *gin.Context) {
-	var req loginReq
+	var req api.LoginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "账号或密码缺失")
 		return
 	}
-	u, token, _, err := s.auth.Login(c.Request.Context(), req.Account, req.Password)
+	u, token, _, err := s.auth.Login(c.Request.Context(), req.GetAccount(), req.GetPassword())
 	if err != nil {
 		renderError(c, err)
 		return

@@ -1,0 +1,13 @@
+version: v2
+# proto 在仓库根的 api/ 目录;字段名严格对齐前端 schema.ts(camelCase),
+# 故关闭包版本后缀与 snake_case 命名 lint(前端无适配层,契约以前端为准)。
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+    - FIELD_LOWER_SNAKE_CASE
+breaking:
+  use:
+    - FILE
