@@ -4,7 +4,7 @@
 
 ## 项目一句话
 
-单体 Go 服务:**框架无关的 `internal/domain` 纯函数核心**(问卷类型 + 逻辑求值 + 校验 + 规范化 + 6 题型 handler),被 gin(HTTP)与 sqlc/pgx(Postgres)两层外壳包着。domain 是前端 `wenjuandiaocha_ui/packages/engine` 的后端孪生。
+单体 Go 服务:**框架无关的 `internal/domain` 纯函数核心**(问卷类型 + 逻辑求值 + 校验 + 规范化 + 6 题型 handler),外面分层包着:`server/http`(gin 传输)→ `service`(业务)→ `dao`(sqlc/pgx),`di` 用 google/wire 组装,`api` 存 proto 信封契约。domain 是前端 `wenjuandiaocha_ui/packages/engine` 的后端孪生。
 
 设计的**结论与理由**在 wiki:`../wenjuandiaocha_wiki/PRD/backend-integration/`(01 需求 / 02 事实 / 03 方案含 DDL / 04 任务)。动手前先读 03-design.md。
 
@@ -20,26 +20,36 @@ Go 1.25 · gin · sqlc + pgx/v5 · goose(迁移)· PostgreSQL 17 · bcrypt + DB-
 
 ## 核心不变量(改代码时必须守住)
 
-1. **domain 纯函数、零框架依赖**:`internal/domain` 不 import gin/pgx。逻辑求值/校验/规范化是纯函数,HTTP 与 DB 是外壳。依赖只从外向内(http/store → domain,domain 谁都不认识)。
+1. **domain 纯函数、零框架依赖**:`internal/domain` 不 import gin/pgx。逻辑求值/校验/规范化是纯函数,传输与 DB 是外壳。依赖只从外向内(server/http → service → dao → domain,domain 谁都不认识)。
 2. **黄金向量即跨语言契约**:`internal/domain` 的求值器必须与前端 `packages/engine/src/logic.ts` 行为逐位一致。`golden_test.go` 读**前端那份** `../wenjuandiaocha_ui/packages/engine/src/__tests__/golden-vectors.json`(单一真相源,不复制进本仓)。改逻辑语义先改那份 JSON,再改两端实现。
 3. **永不信任客户端**:public 提交端点必须用后端载入的**发布版 schema** 完整重跑 Evaluate→Validate→Normalize;客户端传的隐藏题答案由后端求值剔除,落库规范化行以后端为准(frontend.md 决策 6 安全底线)。
 4. **必答判断双层**:multi-choice / matrix-single 的 required 判断在各自 handler 内(空数组/空对象在通用层算「已答」),不在通用 ValidateSurvey。照抄前端 handler 结构,别只在通用层判 required。
-5. **jsonb 整存 schema**:问卷整份 SurveySchema 存 `surveys.draft_schema` / `survey_versions.schema`(jsonb)。store 层当 []byte 转发,不解析;只有 domain 在求值时解析。加题型零 DDL。
+5. **jsonb 整存 schema**:问卷整份 SurveySchema 存 `surveys.draft_schema` / `survey_versions.schema`(jsonb)。dao 层当 []byte 转发,不解析;只有 domain 在求值时解析。加题型零 DDL。
 
 ## 仓库结构
 
+分层对齐 prompt_hub(见 wiki `PRD/backend-dir-restructure/`):依赖只从外向内 `server/http → service → dao → gen`,`service/dao → domain`,`di` 组装全部,`lib` 被各层用不反向依赖。
+
 ```
-cmd/server/       main:装配 config→pgxpool→store→gin router→起服务
+api/              proto 信封契约:api.proto + api.pb.go(buf generate,勿手改)
+                  只建模信封(登录/发布/统计/列表项);SurveySchema 主体仍 []byte 透传
+cmd/server/       main:config→pgxpool→di.InitServer(wire)→起服务
 cmd/seed/         seed 账号(读 .env)
 internal/
   domain/         ★纯函数:schema.go / logic.go / validate.go / normalize.go / qtype/
-  http/           gin handler + 中间件(auth/cors/recover/log)+ render
-  store/          queries/*.sql(手写)+ gen/(sqlc 生成,勿手改)+ store.go(门面+事务)
-  auth/           bcrypt + session
+  server/http/    gin handler(bind→调 service→render)+ 中间件 + render
+  service/        业务层:survey/(CRUD+发布+状态机守卫+归属) submission/(提交编排) auth/(登录/会话)
+  dao/            queries/*.sql(手写)+ gen/(sqlc 生成,勿手改)+ dao.go(门面+事务)
+  di/             google/wire 组装:wire.go(wireinject)+ wire_gen.go(生成,勿手改)
+  ecode/          业务错误码(带 HTTP 状态);service 返回,server/http 用 FromError 映射
+  lib/            通用原语:id/(短 id) ratelimit/(令牌桶)
+  auth/           bcrypt + session token(纯密码学原语)
   config/         env 读取
 db/migrations/    goose 建表 SQL(001_init.sql)
-sqlc.yaml docker-compose.yml Makefile .env.example
+buf.yaml buf.gen.yaml sqlc.yaml docker-compose.yml Makefile .env.example
 ```
+
+生成物三处,改源后重跑:sqlc(`make sqlc`,改 queries/迁移)、proto(`make proto`,改 api.proto)、wire(`make wire`,改 provider set)。
 
 ## 本地开发
 
@@ -66,6 +76,6 @@ wire 字段名严格对齐前端 `packages/engine/src/schema.ts`,前端无适配
 ## 工程约定
 
 - 中文写作(注释/文档),与前端仓一致。
-- sqlc 生成物在 `internal/store/gen/`,**不手改**;改查询改 `queries/*.sql` 后 `make sqlc`。
-- 事务(双写、发布快照)在 `store.go` 手写,单条 SQL 交 sqlc。
+- sqlc 生成物在 `internal/dao/gen/`,**不手改**;改查询改 `queries/*.sql` 后 `make sqlc`。
+- 事务(双写、发布快照)在 `dao.go` 手写,单条 SQL 交 sqlc。
 - 无鉴权的 public 端点在代码/README 显式标注公开 + 防滥用现状。

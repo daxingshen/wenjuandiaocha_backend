@@ -6,6 +6,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/wire"
+
 	authlib "wenjuandiaocha_backend/internal/auth"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
@@ -29,6 +31,9 @@ type Manager struct {
 func New(store Store, sessionTTL time.Duration) *Manager {
 	return &Manager{store: store, sessionTTL: sessionTTL}
 }
+
+// ProviderSet 供 wire 组装(绑定放 di.wire.Build)。sessionTTL 由 di.provideSessionTTL 提供。
+var ProviderSet = wire.NewSet(New)
 
 // User 对外用户信息(对齐前端 AuthUser)。
 type User struct {

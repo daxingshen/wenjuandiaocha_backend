@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/google/wire"
+
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
@@ -30,6 +32,10 @@ type Manager struct {
 }
 
 func New(store Store) *Manager { return &Manager{store: store} }
+
+// ProviderSet 供 wire 组装:只提供 *Manager。
+// *dao.Store→Store 接口的绑定放在 di.wire.Build(与 dao.ProviderSet 同一作用域)。
+var ProviderSet = wire.NewSet(New)
 
 // owned 取问卷并校验归属:查无 → NotFound("不存在");非本人 → Forbidden(对外同样 404 不泄露存在性)。
 func (m *Manager) owned(ctx context.Context, id, ownerID string) (dao.SurveyMeta, error) {

@@ -10,7 +10,7 @@ MIGRATIONS := db/migrations
 # goose 从环境变量读 driver/dbstring(新版不再接受位置参数);显式导出供 migrate 用。
 export GOOSE_DRIVER GOOSE_DBSTRING
 
-.PHONY: help db-up db-down migrate migrate-down sqlc proto run seed test vet tidy
+.PHONY: help db-up db-down migrate migrate-down sqlc proto wire run seed test vet tidy
 
 help:
 	@echo "db-up        起 postgres(docker compose)"
@@ -43,6 +43,10 @@ sqlc:
 proto:
 	buf lint
 	buf generate
+
+# wire:从 internal/di/wire.go 生成 wire_gen.go(改了 provider set 后跑)。
+wire:
+	cd internal/di && go run github.com/google/wire/cmd/wire
 
 run:
 	go run ./cmd/server

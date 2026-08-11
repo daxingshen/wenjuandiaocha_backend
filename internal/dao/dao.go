@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/google/wire"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -18,6 +19,9 @@ import (
 
 // ErrNotFound 统一的「查无」错误,http 层据此回 404。
 var ErrNotFound = errors.New("not found")
+
+// ProviderSet 供 wire 组装:从 *pgxpool.Pool 建 *Store。
+var ProviderSet = wire.NewSet(New)
 
 // Store 数据访问门面。
 type Store struct {

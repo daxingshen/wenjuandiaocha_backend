@@ -24,7 +24,9 @@ make run                      # 起服务 → :8080
 ## 开发命令
 
 ```bash
-make sqlc        # 改了 queries/*.sql 或迁移后,重新生成 internal/store/gen/
+make sqlc        # 改了 queries/*.sql 或迁移后,重新生成 internal/dao/gen/
+make proto       # 改了 api/api.proto 后,重新生成 api/api.pb.go(buf)
+make wire        # 改了 di provider set 后,重新生成 internal/di/wire_gen.go
 make test        # go test ./...(含黄金向量 + 6 题型对拍)
 make vet
 make migrate-down # 回滚最近一个迁移
@@ -67,12 +69,18 @@ base = `/api`。字段严格对齐前端 `packages/engine/src/schema.ts`(前端�
 
 ## 目录
 
+分层对齐 `../prompt_hub`(重构见 wiki `PRD/backend-dir-restructure/`):依赖只从外向内。
+
 ```
-cmd/server/  服务入口(装配)         cmd/seed/  建初始账号
+api/            proto 信封契约:api.proto + api.pb.go(buf,勿手改)
+cmd/server/     入口:config→pgxpool→di.InitServer(wire)   cmd/seed/  建初始账号
 internal/
-  domain/    纯函数核心:schema/logic/validate/normalize + qtype/(6 题型)
-  http/      gin handler + 中间件 + 限频 + id
-  store/     queries/*.sql + gen/(sqlc)+ store.go(门面+事务)
-  auth/      bcrypt + session token       config/  env 读取
+  domain/       纯函数核心:schema/logic/validate/normalize + qtype/(6 题型)
+  server/http/  gin handler(bind→service→render)+ 中间件
+  service/      业务层:survey / submission / auth
+  dao/          queries/*.sql + gen/(sqlc)+ dao.go(门面+事务)
+  di/           google/wire 组装(wire.go + wire_gen.go,勿手改后者)
+  ecode/        业务错误码(带 HTTP 状态)   lib/  id / ratelimit 通用原语
+  auth/         bcrypt + session token       config/  env 读取
 db/migrations/  goose 建表 SQL
 ```

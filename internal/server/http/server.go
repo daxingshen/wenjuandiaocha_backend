@@ -3,12 +3,16 @@ package http
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/google/wire"
 
 	"wenjuandiaocha_backend/internal/config"
 	svcauth "wenjuandiaocha_backend/internal/service/auth"
 	"wenjuandiaocha_backend/internal/service/submission"
 	"wenjuandiaocha_backend/internal/service/survey"
 )
+
+// ProviderSet 供 wire 组装:提供 *Server。
+var ProviderSet = wire.NewSet(NewServer)
 
 // Server 承载 HTTP 依赖:各业务 manager + config。
 type Server struct {

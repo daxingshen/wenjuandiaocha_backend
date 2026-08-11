@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/google/wire"
+
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
@@ -27,6 +29,9 @@ type Manager struct {
 }
 
 func New(store Store) *Manager { return &Manager{store: store} }
+
+// ProviderSet 供 wire 组装(绑定放 di.wire.Build)。
+var ProviderSet = wire.NewSet(New)
 
 // GetPublished 取已发布快照 SurveySchema 原始 jsonb(原样吐前端,无适配层);未发布/不存在 → NotFound。
 func (m *Manager) GetPublished(ctx context.Context, id string) ([]byte, error) {
