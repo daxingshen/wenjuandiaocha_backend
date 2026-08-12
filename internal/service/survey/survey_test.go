@@ -3,7 +3,6 @@ package survey
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
 	"wenjuandiaocha_backend/api"
@@ -43,42 +42,43 @@ func ctxUser(uid string) context.Context {
 	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid})
 }
 
-func statusOf(t *testing.T, err error) int {
+// codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。
+func codeOf(t *testing.T, err error) int {
 	t.Helper()
-	s, _, ok := ecode.FromError(err)
+	c, _, ok := ecode.FromError(err)
 	if !ok {
 		t.Fatalf("期望 ecode.Error,得到 %v", err)
 	}
-	return s
+	return c
 }
 
-// 归属校验:非本人 → 404(不泄露存在性)。
-func TestOwned_NotOwner_Returns404(t *testing.T) {
+// 归属校验:非本人 → NotFound(不泄露存在性)。
+func TestOwned_NotOwner_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
 	m := New(f)
 	_, err := m.Get(ctxUser("bob"), api.SurveyGetReq{ID: "s1"})
-	if got := statusOf(t, err); got != http.StatusNotFound {
-		t.Fatalf("非本人 Get 状态 = %d, want 404", got)
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("非本人 Get code = %d, want CodeNotFound", got)
 	}
 }
 
-// 归属校验:查无 → 404。
-func TestOwned_NotFound_Returns404(t *testing.T) {
+// 归属校验:查无 → NotFound。
+func TestOwned_NotFound_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{getErr: dao.ErrNotFound}
 	m := New(f)
 	_, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"})
-	if got := statusOf(t, err); got != http.StatusNotFound {
-		t.Fatalf("查无 Close 状态 = %d, want 404", got)
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("查无 Close code = %d, want CodeNotFound", got)
 	}
 }
 
-// 状态机守卫:非 live 结束 → 409,且不写状态。
-func TestClose_NotLive_Returns409(t *testing.T) {
+// 状态机守卫:非 live 结束 → Conflict,且不写状态。
+func TestClose_NotLive_ReturnsConflict(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
 	m := New(f)
 	_, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"})
-	if got := statusOf(t, err); got != http.StatusConflict {
-		t.Fatalf("draft Close 状态 = %d, want 409", got)
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("draft Close code = %d, want CodeConflict", got)
 	}
 	if f.setCalled {
 		t.Fatalf("非法跳转不应调用 SetStatus")
@@ -102,8 +102,8 @@ func TestReopen_NeverPublished_Returns409(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: nil}}
 	m := New(f)
 	_, err := m.Reopen(ctxUser("alice"), api.SurveyReopenReq{ID: "s1"})
-	if got := statusOf(t, err); got != http.StatusConflict {
-		t.Fatalf("未发布 Reopen 状态 = %d, want 409", got)
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("未发布 Reopen code = %d, want CodeConflict", got)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestCreate_BadJSON_Returns400(t *testing.T) {
 	f := &fakeStore{}
 	m := New(f)
 	_, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: []byte("{not json")})
-	if got := statusOf(t, err); got != http.StatusBadRequest {
-		t.Fatalf("非法 JSON Create 状态 = %d, want 400", got)
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("非法 JSON Create code = %d, want CodeBadRequest", got)
 	}
 }
 

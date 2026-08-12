@@ -2,6 +2,7 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -34,7 +35,7 @@ func (s *Server) listSurveys(c *gin.Context) {
 			UpdatedAt: it.UpdatedAt.Format(time.RFC3339),
 		})
 	}
-	c.JSON(http.StatusOK, out)
+	render.Success(c, out)
 }
 
 // createSurvey POST /api/surveys —— 首存落库,返回 { id }(后端分配 id)。
@@ -45,7 +46,7 @@ func (s *Server) createSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": resp.ID})
+	render.Success(c, gin.H{"id": resp.ID})
 }
 
 // getSurvey GET /api/surveys/:id —— 返回草稿 SurveySchema(供编辑)。归属校验。
@@ -55,7 +56,8 @@ func (s *Server) getSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.Data(http.StatusOK, "application/json; charset=utf-8", resp.Schema)
+	// 草稿 schema JSON,用 RawMessage 原样嵌入信封 data(不二次转义)。
+	render.Success(c, json.RawMessage(resp.Schema))
 }
 
 // updateSurvey PUT /api/surveys/:id —— 存草稿。body 是整份 SurveySchema。归属校验。
@@ -69,7 +71,8 @@ func (s *Server) updateSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	// 纯占位成功:code=0 已表成功,data 置 nil。
+	render.Success(c, nil)
 }
 
 // publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live。
@@ -80,7 +83,7 @@ func (s *Server) publishSurvey(c *gin.Context) {
 		return
 	}
 	// unchanged=true:草稿与当前对外版本一致,未造新版本(重发免空版)。前端据此提示「内容未变」。
-	c.JSON(http.StatusOK, gin.H{"ok": true, "version": resp.Version, "unchanged": resp.Unchanged})
+	render.Success(c, gin.H{"version": resp.Version, "unchanged": resp.Unchanged})
 }
 
 // closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。状态机守卫在 service。
@@ -89,7 +92,7 @@ func (s *Server) closeSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	render.Success(c, nil)
 }
 
 // reopenSurvey POST /api/surveys/:id/reopen —— 重新打开(closed → live)。守卫在 service。
@@ -98,7 +101,7 @@ func (s *Server) reopenSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	render.Success(c, nil)
 }
 
 // surveyStats 对齐前端问卷概览:状态 + 已发布版本 + 答卷数。
@@ -115,7 +118,7 @@ func (s *Server) surveyStats(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, surveyStats{
+	render.Success(c, surveyStats{
 		Status:           st.Status,
 		PublishedVersion: st.PublishedVersion,
 		ResponseCount:    st.ResponseCount,

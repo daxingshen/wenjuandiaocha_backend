@@ -8,6 +8,7 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -28,8 +29,8 @@ func (s *Server) getPublicSurvey(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	// 快照本身就是 SurveySchema JSON,原样吐(前端无适配层)。
-	c.Data(http.StatusOK, "application/json; charset=utf-8", resp.Schema)
+	// 快照本身就是 SurveySchema JSON,用 RawMessage 原样嵌入信封 data(不二次转义)。
+	render.Success(c, json.RawMessage(resp.Schema))
 }
 
 type submitReq struct {
@@ -66,5 +67,5 @@ func (s *Server) submitAnswers(c *gin.Context) {
 		render.Validation(c, res.ValidationErrors)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "rows": res.Rows})
+	render.Success(c, gin.H{"rows": res.Rows})
 }
