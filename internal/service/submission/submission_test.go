@@ -2,7 +2,6 @@ package submission
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"wenjuandiaocha_backend/api"
@@ -40,13 +39,14 @@ func (f *fakeStore) SaveSubmission(_ context.Context, _, _ string, version int, 
 	return nil
 }
 
-func statusOf(t *testing.T, err error) int {
+// codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。
+func codeOf(t *testing.T, err error) int {
 	t.Helper()
-	s, _, ok := ecode.FromError(err)
+	c, _, ok := ecode.FromError(err)
 	if !ok {
 		t.Fatalf("期望 ecode.Error,得到 %v", err)
 	}
-	return s
+	return c
 }
 
 func liveMeta() dao.SurveyMeta { return dao.SurveyMeta{ID: "s1", Status: "live"} }
@@ -54,23 +54,23 @@ func liveMeta() dao.SurveyMeta { return dao.SurveyMeta{ID: "s1", Status: "live"}
 // 空 schema(无题无规则)的最小合法 JSON。
 const emptySchema = `{"id":"s1","type":"survey","title":"t","version":3,"questions":[],"rules":[]}`
 
-// 收答守卫:非 live → 404。
-func TestSubmit_NotLive_Returns404(t *testing.T) {
+// 收答守卫:非 live → NotFound。
+func TestSubmit_NotLive_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "closed"}}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if got := statusOf(t, err); got != http.StatusNotFound {
-		t.Fatalf("closed 提交状态 = %d, want 404", got)
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("closed 提交 code = %d, want CodeNotFound", got)
 	}
 }
 
-// 收答守卫:问卷查无 → 404。
-func TestSubmit_SurveyNotFound_Returns404(t *testing.T) {
+// 收答守卫:问卷查无 → NotFound。
+func TestSubmit_SurveyNotFound_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{metaErr: dao.ErrNotFound}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if got := statusOf(t, err); got != http.StatusNotFound {
-		t.Fatalf("查无提交状态 = %d, want 404", got)
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("查无提交 code = %d, want CodeNotFound", got)
 	}
 }
 
@@ -90,13 +90,13 @@ func TestSubmit_VersionPinned_UsesVersionSchema(t *testing.T) {
 	}
 }
 
-// 版本锚定:version>0 但该版失效 → 400 引导刷新。
-func TestSubmit_VersionStale_Returns400(t *testing.T) {
+// 版本锚定:version>0 但该版失效 → BadRequest 引导刷新。
+func TestSubmit_VersionStale_ReturnsBadRequest(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), versionErr: dao.ErrNotFound}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Version: 9})
-	if got := statusOf(t, err); got != http.StatusBadRequest {
-		t.Fatalf("失效版本提交状态 = %d, want 400", got)
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("失效版本提交 code = %d, want CodeBadRequest", got)
 	}
 }
 
@@ -116,13 +116,13 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 	}
 }
 
-// GetPublished:未发布 → 404。
-func TestGetPublished_NotFound_Returns404(t *testing.T) {
+// GetPublished:未发布 → NotFound。
+func TestGetPublished_NotFound_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{publishedErr: dao.ErrNotFound}
 	m := New(f)
 	_, err := m.GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
-	if got := statusOf(t, err); got != http.StatusNotFound {
-		t.Fatalf("未发布 GetPublished 状态 = %d, want 404", got)
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("未发布 GetPublished code = %d, want CodeNotFound", got)
 	}
 }
 

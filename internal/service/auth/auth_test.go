@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
@@ -40,13 +39,14 @@ func (f *fakeStore) DeleteSession(_ context.Context, _ string) error {
 	return nil
 }
 
-func statusOf(t *testing.T, err error) int {
+// codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。
+func codeOf(t *testing.T, err error) int {
 	t.Helper()
-	s, _, ok := ecode.FromError(err)
+	c, _, ok := ecode.FromError(err)
 	if !ok {
 		t.Fatalf("期望 ecode.Error,得到 %v", err)
 	}
-	return s
+	return c
 }
 
 // 防枚举:账号不存在 → Unauthorized（与密码错同文案同码）。
@@ -54,8 +54,8 @@ func TestLogin_AccountNotFound_Unauthorized(t *testing.T) {
 	f := &fakeStore{userErr: dao.ErrNotFound}
 	m := New(f, time.Hour)
 	_, err := m.Login(context.Background(), api.AuthLoginReq{Account: "ghost", Password: "pw"})
-	if got := statusOf(t, err); got != http.StatusUnauthorized {
-		t.Fatalf("账号不存在状态 = %d, want 401", got)
+	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
+		t.Fatalf("账号不存在 code = %d, want CodeUnauthorized", got)
 	}
 }
 
@@ -66,14 +66,14 @@ func TestLogin_WrongPassword_SameAsUnknownAccount(t *testing.T) {
 	m := New(f, time.Hour)
 
 	_, errWrong := m.Login(context.Background(), api.AuthLoginReq{Account: "alice", Password: "wrong"})
-	sWrong, mWrong, _ := ecode.FromError(errWrong)
+	cWrong, mWrong, _ := ecode.FromError(errWrong)
 
 	f2 := &fakeStore{userErr: dao.ErrNotFound}
 	_, errGhost := New(f2, time.Hour).Login(context.Background(), api.AuthLoginReq{Account: "ghost", Password: "wrong"})
-	sGhost, mGhost, _ := ecode.FromError(errGhost)
+	cGhost, mGhost, _ := ecode.FromError(errGhost)
 
-	if sWrong != http.StatusUnauthorized || sWrong != sGhost || mWrong != mGhost {
-		t.Fatalf("密码错(%d,%q)与账号不存在(%d,%q)应不可区分", sWrong, mWrong, sGhost, mGhost)
+	if cWrong != ecode.CodeUnauthorized || cWrong != cGhost || mWrong != mGhost {
+		t.Fatalf("密码错(%d,%q)与账号不存在(%d,%q)应不可区分", cWrong, mWrong, cGhost, mGhost)
 	}
 	if f.created {
 		t.Fatal("密码错不应建会话")
@@ -84,8 +84,8 @@ func TestLogin_WrongPassword_SameAsUnknownAccount(t *testing.T) {
 func TestLogin_EmptyAccount_BadRequest(t *testing.T) {
 	m := New(&fakeStore{}, time.Hour)
 	_, err := m.Login(context.Background(), api.AuthLoginReq{Account: "", Password: "pw"})
-	if got := statusOf(t, err); got != http.StatusBadRequest {
-		t.Fatalf("空账号状态 = %d, want 400", got)
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("空账号 code = %d, want CodeBadRequest", got)
 	}
 }
 
@@ -103,26 +103,26 @@ func TestLogin_Success_CreatesSession(t *testing.T) {
 	}
 }
 
-// ValidateSession:过期 → 删除会话并 401。
-func TestValidateSession_Expired_DeletesAnd401(t *testing.T) {
+// ValidateSession:过期 → 删除会话并 Unauthorized。
+func TestValidateSession_Expired_DeletesAndUnauthorized(t *testing.T) {
 	f := &fakeStore{sessUserID: "u1", sessExpires: time.Now().Add(-time.Minute)}
 	m := New(f, time.Hour)
 	_, err := m.ValidateSession(api.WithMetadata(context.Background(), api.Metadata{Token: "tok"}))
-	if got := statusOf(t, err); got != http.StatusUnauthorized {
-		t.Fatalf("过期会话状态 = %d, want 401", got)
+	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
+		t.Fatalf("过期会话 code = %d, want CodeUnauthorized", got)
 	}
 	if !f.deleted {
 		t.Fatal("过期会话应被删除")
 	}
 }
 
-// ValidateSession:查无 → 401。
-func TestValidateSession_NotFound_401(t *testing.T) {
+// ValidateSession:查无 → Unauthorized。
+func TestValidateSession_NotFound_Unauthorized(t *testing.T) {
 	f := &fakeStore{sessErr: dao.ErrNotFound}
 	m := New(f, time.Hour)
 	_, err := m.ValidateSession(api.WithMetadata(context.Background(), api.Metadata{Token: "tok"}))
-	if got := statusOf(t, err); got != http.StatusUnauthorized {
-		t.Fatalf("无效会话状态 = %d, want 401", got)
+	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
+		t.Fatalf("无效会话 code = %d, want CodeUnauthorized", got)
 	}
 }
 

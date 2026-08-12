@@ -38,7 +38,7 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 	s.setSessionCookie(c, resp.Token)
-	c.JSON(http.StatusOK, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
+	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
 }
 
 func (s *Server) logout(c *gin.Context) {
@@ -49,7 +49,7 @@ func (s *Server) logout(c *gin.Context) {
 		_ = s.auth.Logout(api.WithMetadata(c.Request.Context(), md))
 	}
 	s.clearSessionCookie(c)
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	render.Success(c, nil)
 }
 
 func (s *Server) me(c *gin.Context) {
@@ -59,7 +59,7 @@ func (s *Server) me(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
+	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
 }
 
 func (s *Server) setSessionCookie(c *gin.Context, token string) {
