@@ -122,11 +122,11 @@ func (s *Server) submitAnswersAuthed(c *gin.Context) {
 		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
 		return
 	}
+	// 不传登录标记 —— submission 从 ctx 的会话身份(requireAuth 注入的 UserID)自行确认已登录。
 	res, err := s.submissions.Submit(c.Request.Context(), api.SubmitReq{
-		SurveyID:      c.Param("id"),
-		Answers:       req.Answers,
-		Version:       req.Version,
-		Authenticated: true, // 鉴权路径:submission 据此走 login_required 分支 + 校作答能力位
+		SurveyID: c.Param("id"),
+		Answers:  req.Answers,
+		Version:  req.Version,
 	})
 	if err != nil {
 		render.Error(c, err)

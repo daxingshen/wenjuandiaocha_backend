@@ -1,14 +1,17 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- 用户(studio 登录)
+-- 用户(studio 登录 + 作答账号)
+-- level:套餐轴(付费买功能量,纯展示不授权)。role:RBAC 角色轴(身份管辖范围),二者正交。
 CREATE TABLE users (
   id            TEXT PRIMARY KEY,
   account       TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
-  level         TEXT NOT NULL DEFAULT 'free',   -- free|pro|team|enterprise
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  level         TEXT NOT NULL DEFAULT 'free',      -- free|pro|team|enterprise
+  role          TEXT NOT NULL DEFAULT 'creator',   -- admin|creator|respondent(RBAC)
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT users_role_chk CHECK (role IN ('admin', 'creator', 'respondent'))
 );
 
 -- 会话(DB-backed session)
@@ -21,16 +24,20 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_user ON sessions(user_id);
 
 -- 问卷(元信息 + 当前草稿)
+-- status:生命周期状态机 draft→live→closed→live。answer_access:作答访问模式(发布时设定,与 status 正交)。
 CREATE TABLE surveys (
   id                TEXT PRIMARY KEY,
   owner_id          TEXT NOT NULL REFERENCES users(id),
-  type              TEXT NOT NULL DEFAULT 'survey',  -- SurveyType
+  type              TEXT NOT NULL DEFAULT 'survey',       -- SurveyType
   title             TEXT NOT NULL,
-  status            TEXT NOT NULL DEFAULT 'draft',   -- draft|live|closed
-  draft_schema      JSONB NOT NULL,                  -- 整份 SurveySchema(编辑中)
-  published_version INT,                             -- → survey_versions.version;未发布 NULL
+  status            TEXT NOT NULL DEFAULT 'draft',        -- draft|live|closed
+  draft_schema      JSONB NOT NULL,                       -- 整份 SurveySchema(编辑中)
+  published_version INT,                                  -- → survey_versions.version;未发布 NULL
+  answer_access     TEXT NOT NULL DEFAULT 'anonymous',    -- anonymous|login_required
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT surveys_status_chk CHECK (status IN ('draft', 'live', 'closed')),
+  CONSTRAINT surveys_answer_access_chk CHECK (answer_access IN ('anonymous', 'login_required'))
 );
 CREATE INDEX idx_surveys_owner ON surveys(owner_id);
 

@@ -7,8 +7,6 @@ package gen
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :exec
@@ -42,19 +40,9 @@ SELECT id, account, password_hash, name, level, role, created_at
 FROM users WHERE account = $1
 `
 
-type GetUserByAccountRow struct {
-	ID           string
-	Account      string
-	PasswordHash string
-	Name         string
-	Level        string
-	Role         string
-	CreatedAt    pgtype.Timestamptz
-}
-
-func (q *Queries) GetUserByAccount(ctx context.Context, account string) (GetUserByAccountRow, error) {
+func (q *Queries) GetUserByAccount(ctx context.Context, account string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByAccount, account)
-	var i GetUserByAccountRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Account,
@@ -72,19 +60,9 @@ SELECT id, account, password_hash, name, level, role, created_at
 FROM users WHERE id = $1
 `
 
-type GetUserByIDRow struct {
-	ID           string
-	Account      string
-	PasswordHash string
-	Name         string
-	Level        string
-	Role         string
-	CreatedAt    pgtype.Timestamptz
-}
-
-func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i GetUserByIDRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Account,

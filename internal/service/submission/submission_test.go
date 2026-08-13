@@ -116,16 +116,17 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 	}
 }
 
-// ctxRole 造带角色身份的 ctx(鉴权作答路径用)。
+// ctxRole 造一个「已登录」ctx:带真实会话身份(UserID)+ 角色。
+// UserID 非空 = submission 据此判定为已登录路径(等价 requireAuth 注入后的 ctx)。
 func ctxRole(role string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{Role: role})
+	return api.WithMetadata(context.Background(), api.Metadata{UserID: "u_" + role, Role: role})
 }
 
 // 作答模式闸门:login_required 问卷经匿名路径提交 → NotFound(不泄露需登录)。
 func TestSubmit_LoginRequired_AnonPath_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}}) // Authenticated=false
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}}) // 无 UserID = 匿名
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
 		t.Fatalf("login_required 匿名提交 code = %d, want CodeNotFound", got)
 	}
@@ -138,7 +139,7 @@ func TestSubmit_LoginRequired_AnonPath_ReturnsNotFound(t *testing.T) {
 func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Authenticated: true})
+	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("anonymous 鉴权提交 code = %d, want CodeBadRequest", got)
 	}
@@ -148,7 +149,7 @@ func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Authenticated: true})
+	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeForbidden {
 		t.Fatalf("creator 鉴权作答 code = %d, want CodeForbidden(403)", got)
 	}
@@ -161,7 +162,7 @@ func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
 func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Authenticated: true})
+	res, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if err != nil || len(res.ValidationErrors) > 0 {
 		t.Fatalf("respondent 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
 	}
@@ -174,7 +175,7 @@ func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
 func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Authenticated: true})
+	res, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
 	if err != nil || len(res.ValidationErrors) > 0 {
 		t.Fatalf("admin 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
 	}

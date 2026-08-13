@@ -62,9 +62,14 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。
 // 校验失败通过 SubmitResp.ValidationErrors 返回(传输层据此回 400 + {errors}),error 仍为 nil。
 func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error) {
-	// 鉴权路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。
-	// 匿名路径(Authenticated=false)无账号、不查能力位,走 anonymous 问卷分支。
-	if req.Authenticated && !rbac.Can(rbac.Role(api.MetadataFrom(ctx).Role), rbac.ActionSubmitAnswer) {
+	// 登录态由后端从 ctx 会话身份确认,不采信调用方声明:UserID 仅由 requireAuth 校验
+	// session 后注入(匿名 /public 路由无此中间件,UserID 恒空),故 UserID != "" ⟺ 已登录。
+	md := api.MetadataFrom(ctx)
+	authenticated := md.UserID != ""
+
+	// 已登录路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。
+	// 匿名路径无账号、不查能力位,走 anonymous 问卷分支。
+	if authenticated && !rbac.Can(rbac.Role(md.Role), rbac.ActionSubmitAnswer) {
 		return api.SubmitResp{}, ecode.Forbidden403("当前账号无作答权限")
 	}
 
@@ -85,10 +90,10 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 	//   - anonymous 问卷:仅匿名路径提交;鉴权路径不服务它 → BadRequest 引导走 /public(职责单一)。
 	// 空/历史值(迁移默认 anonymous)按 anonymous 处理。
 	loginRequired := survey.AnswerAccess == domain.AnswerLoginRequired
-	if loginRequired && !req.Authenticated {
+	if loginRequired && !authenticated {
 		return api.SubmitResp{}, ecode.NotFound("问卷不存在或未发布")
 	}
-	if !loginRequired && req.Authenticated {
+	if !loginRequired && authenticated {
 		return api.SubmitResp{}, ecode.BadRequest("该问卷为匿名作答,请通过公开链接提交")
 	}
 
@@ -111,8 +116,7 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 
 	// raw 存客户端提交的 answers;落库规范化行以后端为准。
 	rawJSON, _ := json.Marshal(req.Answers)
-	// 防刷 meta(ip/ua)来自 ctx metadata;字段形状与原 http clientMeta 一致(map 键序 ip<ua)。
-	md := api.MetadataFrom(ctx)
+	// 防刷 meta(ip/ua)来自 ctx metadata(md 已在方法开头取得);字段形状与原 http clientMeta 一致(map 键序 ip<ua)。
 	metaJSON, _ := json.Marshal(map[string]any{"ip": md.ClientIP, "ua": md.UserAgent})
 	respID := id.New()
 	if err := m.store.SaveSubmission(ctx, respID, req.SurveyID, schema.Version, rawJSON, metaJSON, rows); err != nil {

@@ -127,10 +127,9 @@ type SubmitReq struct {
 	SurveyID string // URL 路径参数
 	Answers  domain.Answers
 	Version  int32 // >0 版本锚定按该历史版校验;0 回落当前发布版
-	// Authenticated 标记提交来自鉴权路径(已登录 + 作答能力位已过)。
-	// 决定作答模式闸门:false=匿名 /public 路径(仅 anonymous 问卷放行);
-	// true=鉴权 /api/surveys/:id/answers 路径(仅 login_required 问卷放行)。
-	Authenticated bool
+	// 是否已登录不进 Req —— 由 submission service 从 ctx 的会话身份(Metadata.UserID)
+	// 自行确认,不采信调用方声明:UserID 仅由 requireAuth 校验 session 后注入,
+	// 匿名 /public 路由无此中间件、拿不到 UserID,故后端据真实会话状态区分匿名/登录。
 }
 type SubmitResp struct {
 	Rows             int

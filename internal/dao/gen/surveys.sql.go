@@ -54,22 +54,9 @@ SELECT id, owner_id, type, title, status, draft_schema, published_version, answe
 FROM surveys WHERE id = $1
 `
 
-type GetSurveyRow struct {
-	ID               string
-	OwnerID          string
-	Type             string
-	Title            string
-	Status           string
-	DraftSchema      []byte
-	PublishedVersion *int32
-	AnswerAccess     string
-	CreatedAt        pgtype.Timestamptz
-	UpdatedAt        pgtype.Timestamptz
-}
-
-func (q *Queries) GetSurvey(ctx context.Context, id string) (GetSurveyRow, error) {
+func (q *Queries) GetSurvey(ctx context.Context, id string) (Survey, error) {
 	row := q.db.QueryRow(ctx, getSurvey, id)
-	var i GetSurveyRow
+	var i Survey
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerID,
