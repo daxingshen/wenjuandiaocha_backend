@@ -120,6 +120,55 @@ func TestReopen_Published_SetsLive(t *testing.T) {
 	}
 }
 
+// updateFake 在 fakeStore 基础上记录 UpdateDraft 是否被调用,用于断言"守卫拦下时不写库"。
+type updateFake struct {
+	fakeStore
+	updateCalled bool
+}
+
+func (f *updateFake) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) error {
+	f.updateCalled = true
+	return nil
+}
+
+// 编辑守卫:draft 放行 → 写库(UpdateDraft 被调用)。
+func TestUpdate_Draft_Writes(t *testing.T) {
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}}
+	m := New(f)
+	if _, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)}); err != nil {
+		t.Fatalf("draft Update 应成功,得到 %v", err)
+	}
+	if !f.updateCalled {
+		t.Fatalf("draft Update 应调用 UpdateDraft 写库")
+	}
+}
+
+// 编辑守卫:live 拒 → Conflict,且不写库。
+func TestUpdate_Live_ReturnsConflict(t *testing.T) {
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}}
+	m := New(f)
+	_, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)})
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("live Update code = %d, want CodeConflict", got)
+	}
+	if f.updateCalled {
+		t.Fatalf("已发布问卷不应写库")
+	}
+}
+
+// 编辑守卫:closed 拒 → Conflict,且不写库。
+func TestUpdate_Closed_ReturnsConflict(t *testing.T) {
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed"}}}
+	m := New(f)
+	_, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)})
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("closed Update code = %d, want CodeConflict", got)
+	}
+	if f.updateCalled {
+		t.Fatalf("已截止问卷不应写库")
+	}
+}
+
 // Create:空 body 也应补默认并落库,返回后端分配的 id(忽略客户端 id)。
 func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 	f := &fakeStore{}

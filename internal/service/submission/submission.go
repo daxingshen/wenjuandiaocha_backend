@@ -69,7 +69,7 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 		}
 		return api.SubmitResp{}, err
 	}
-	if survey.Status != "live" {
+	if survey.Status != domain.StatusLive {
 		return api.SubmitResp{}, ecode.NotFound("问卷不存在或未发布")
 	}
 
