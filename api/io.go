@@ -46,12 +46,11 @@ func MetadataFrom(ctx context.Context) Metadata {
 // ---------- auth 域 ----------
 
 // AuthUser 对外用户信息(对齐前端 AuthUser)。
-// Role 为 RBAC 角色轴,正交于套餐 Level;前端可据此做体验层门控(前端同步不在本轮范围)。
+// Role 为 RBAC 角色轴;前端可据此做体验层门控(前端同步不在本轮范围)。
 type AuthUser struct {
-	ID    string
-	Name  string
-	Level string
-	Role  string
+	ID   string
+	Name string
+	Role string
 }
 
 type AuthLoginReq struct{ Account, Password string }

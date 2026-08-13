@@ -5,8 +5,7 @@
 // admin 短路 owned()。设计与矩阵权威见 wiki/RBAC-账号权限设计.md「能力矩阵」节。
 //
 // 角色少、变更需 code review,故矩阵硬编码在此,不做运行时可配置(方案 A)。
-// 角色轴 role 正交于套餐轴 level:level 决定「能用多少功能」,role 决定「能对谁的资源做什么」,
-// 二者不可互相代入。
+// role 决定「身份能对谁的资源做什么」。
 package rbac
 
 // Role 是账号角色(users.role)。零值不是合法角色 —— 未知角色一律无能力。

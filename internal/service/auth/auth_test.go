@@ -63,7 +63,7 @@ func TestLogin_AccountNotFound_Unauthorized(t *testing.T) {
 // 防枚举:密码错 → Unauthorized，消息与账号不存在一致（不可区分）。
 func TestLogin_WrongPassword_SameAsUnknownAccount(t *testing.T) {
 	hash, _ := authlib.HashPassword("correct-horse")
-	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "n", Level: "admin"}}
+	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "n", Role: "creator"}}
 	m := New(f, time.Hour)
 
 	_, errWrong := m.Login(context.Background(), api.AuthLoginReq{Account: "alice", Password: "wrong"})
@@ -93,7 +93,7 @@ func TestLogin_EmptyAccount_BadRequest(t *testing.T) {
 // 正确账密 → 成功建会话,返回用户与 token。
 func TestLogin_Success_CreatesSession(t *testing.T) {
 	hash, _ := authlib.HashPassword("pw")
-	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "Alice", Level: "admin"}}
+	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "Alice", Role: "creator"}}
 	m := New(f, time.Hour)
 	resp, err := m.Login(context.Background(), api.AuthLoginReq{Account: "alice", Password: "pw"})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestValidateSession_Valid_ReturnsUIDAndRole(t *testing.T) {
 // Login/Me 透出 role(对外 AuthUser.Role),供前端体验层门控。
 func TestLoginAndMe_PropagateRole(t *testing.T) {
 	hash, _ := authlib.HashPassword("pw")
-	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "Alice", Level: "pro", Role: "creator"}}
+	f := &fakeStore{user: dao.User{ID: "u1", PasswordHash: hash, Name: "Alice", Role: "creator"}}
 	m := New(f, time.Hour)
 	login, err := m.Login(context.Background(), api.AuthLoginReq{Account: "alice", Password: "pw"})
 	if err != nil || login.User.Role != "creator" {

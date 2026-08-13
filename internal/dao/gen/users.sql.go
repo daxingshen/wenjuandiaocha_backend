@@ -10,8 +10,8 @@ import (
 )
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO users (id, account, password_hash, name, level, role)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO users (id, account, password_hash, name, role)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateUserParams struct {
@@ -19,7 +19,6 @@ type CreateUserParams struct {
 	Account      string
 	PasswordHash string
 	Name         string
-	Level        string
 	Role         string
 }
 
@@ -29,14 +28,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.Account,
 		arg.PasswordHash,
 		arg.Name,
-		arg.Level,
 		arg.Role,
 	)
 	return err
 }
 
 const getUserByAccount = `-- name: GetUserByAccount :one
-SELECT id, account, password_hash, name, level, role, created_at
+SELECT id, account, password_hash, name, role, created_at
 FROM users WHERE account = $1
 `
 
@@ -48,7 +46,6 @@ func (q *Queries) GetUserByAccount(ctx context.Context, account string) (User, e
 		&i.Account,
 		&i.PasswordHash,
 		&i.Name,
-		&i.Level,
 		&i.Role,
 		&i.CreatedAt,
 	)
@@ -56,7 +53,7 @@ func (q *Queries) GetUserByAccount(ctx context.Context, account string) (User, e
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, account, password_hash, name, level, role, created_at
+SELECT id, account, password_hash, name, role, created_at
 FROM users WHERE id = $1
 `
 
@@ -68,7 +65,6 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.Account,
 		&i.PasswordHash,
 		&i.Name,
-		&i.Level,
 		&i.Role,
 		&i.CreatedAt,
 	)

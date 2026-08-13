@@ -16,13 +16,12 @@ type User struct {
 	Account      string
 	PasswordHash string
 	Name         string
-	Level        string
-	Role         string // 账号角色 admin|creator|respondent(RBAC 角色轴,正交于 Level)
+	Role         string // 账号角色 admin|creator|respondent(RBAC 角色轴)
 }
 
 func (s *Store) CreateUser(ctx context.Context, u User) error {
 	return s.q.CreateUser(ctx, gen.CreateUserParams{
-		ID: u.ID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Level: u.Level, Role: u.Role,
+		ID: u.ID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Role: u.Role,
 	})
 }
 
@@ -31,7 +30,7 @@ func (s *Store) GetUserByAccount(ctx context.Context, account string) (User, err
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level, Role: r.Role}, nil
+	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -39,7 +38,7 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level, Role: r.Role}, nil
+	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
 }
 
 // ---------- 会话 ----------

@@ -2,13 +2,12 @@
 -- +goose StatementBegin
 
 -- 用户(studio 登录 + 作答账号)
--- level:套餐轴(付费买功能量,纯展示不授权)。role:RBAC 角色轴(身份管辖范围),二者正交。
+-- role:RBAC 角色轴(身份能对谁的资源做什么)。
 CREATE TABLE users (
   id            TEXT PRIMARY KEY,
   account       TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
-  level         TEXT NOT NULL DEFAULT 'free',      -- free|pro|team|enterprise
   role          TEXT NOT NULL DEFAULT 'creator',   -- admin|creator|respondent(RBAC)
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT users_role_chk CHECK (role IN ('admin', 'creator', 'respondent'))

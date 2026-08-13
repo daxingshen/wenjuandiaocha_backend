@@ -60,7 +60,6 @@ type User struct {
 	Account      string
 	PasswordHash string
 	Name         string
-	Level        string
 	Role         string
 	CreatedAt    pgtype.Timestamptz
 }
