@@ -12,18 +12,28 @@ import (
 
 // fakeStore 只实现被测路径需要的方法;其余返回零值。
 type fakeStore struct {
-	meta       dao.SurveyMeta
-	getErr     error
-	setStatus  string // 记录 SetStatus 实际写入的状态
-	setCalled  bool
-	publishVer int
+	meta            dao.SurveyMeta
+	getErr          error
+	setStatus       string // 记录 SetStatus 实际写入的状态
+	setCalled       bool
+	publishVer      int
+	publishedAccess string // 记录 Publish 实际写入的作答模式
+	listOwner       string // 记录 ListSurveysByOwner 收到的 ownerID
+	listAllCalled   bool   // 记录是否走了全站列表(admin)
+	ownerItems      []dao.SurveyListItem
+	allItems        []dao.SurveyListItem
 }
 
 func (f *fakeStore) GetSurvey(_ context.Context, _ string) (dao.SurveyMeta, error) {
 	return f.meta, f.getErr
 }
-func (f *fakeStore) ListSurveysByOwner(_ context.Context, _ string) ([]dao.SurveyListItem, error) {
-	return nil, nil
+func (f *fakeStore) ListSurveysByOwner(_ context.Context, ownerID string) ([]dao.SurveyListItem, error) {
+	f.listOwner = ownerID
+	return f.ownerItems, nil
+}
+func (f *fakeStore) ListAllSurveys(_ context.Context) ([]dao.SurveyListItem, error) {
+	f.listAllCalled = true
+	return f.allItems, nil
 }
 func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte) error { return nil }
 func (f *fakeStore) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) error     { return nil }
@@ -32,14 +42,20 @@ func (f *fakeStore) SetStatus(_ context.Context, _, status string) error {
 	f.setStatus = status
 	return nil
 }
-func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte) (int, bool, error) {
+func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte, answerAccess string) (int, bool, error) {
+	f.publishedAccess = answerAccess
 	return f.publishVer, false, nil
 }
 func (f *fakeStore) CountResponses(_ context.Context, _ string) (int32, error) { return 0, nil }
 
-// ctxUser 造一个带指定用户身份的 ctx(替代原 Req.OwnerID)。
+// ctxUser 造一个带指定用户身份的 ctx(默认 creator 角色:既有归属/状态机用例都是「创作者管自己的卷」场景)。
 func ctxUser(uid string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid})
+	return ctxRole(uid, "creator")
+}
+
+// ctxRole 造带指定用户 id + 角色的 ctx(RBAC 判定用)。
+func ctxRole(uid, role string) context.Context {
+	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid, Role: role})
 }
 
 // codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。
@@ -189,6 +205,110 @@ func TestCreate_BadJSON_Returns400(t *testing.T) {
 	_, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: []byte("{not json")})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("非法 JSON Create code = %d, want CodeBadRequest", got)
+	}
+}
+
+// --- RBAC 第一层能力位 + 第二层归属(admin 短路)---
+
+// respondent 调创作端动作 → 403(第一层能力位;它只能作答)。
+func TestGet_Respondent_ReturnsForbidden403(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	m := New(f)
+	_, err := m.Get(ctxRole("bob", "respondent"), api.SurveyGetReq{ID: "s1"})
+	if got := codeOf(t, err); got != ecode.CodeForbidden {
+		t.Fatalf("respondent 读创作端 code = %d, want CodeForbidden(403)", got)
+	}
+}
+
+// respondent 建卷 → 403(能力位挡下,不落库)。
+func TestCreate_Respondent_ReturnsForbidden403(t *testing.T) {
+	f := &fakeStore{}
+	m := New(f)
+	_, err := m.Create(ctxRole("bob", "respondent"), api.SurveyCreateReq{Body: nil})
+	if got := codeOf(t, err); got != ecode.CodeForbidden {
+		t.Fatalf("respondent 建卷 code = %d, want CodeForbidden(403)", got)
+	}
+}
+
+// creator A 访问 creator B 的卷 → 404(第二层归属,防枚举;能力位已过)。
+func TestGet_CreatorCrossUser_ReturnsNotFound(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	m := New(f)
+	_, err := m.Get(ctxRole("bob", "creator"), api.SurveyGetReq{ID: "s1"})
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("creator 跨用户 code = %d, want CodeNotFound(404)", got)
+	}
+}
+
+// admin 短路归属:读他人的卷 → 放行(跨 owner)。
+func TestGet_Admin_CrossOwner_Allowed(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft", DraftSchema: []byte(`{"id":"s1"}`)}}
+	m := New(f)
+	resp, err := m.Get(ctxRole("admin-user", "admin"), api.SurveyGetReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("admin 跨 owner 读应放行,得到 %v", err)
+	}
+	if string(resp.Schema) != `{"id":"s1"}` {
+		t.Fatalf("admin 应拿到他人草稿,得到 %q", resp.Schema)
+	}
+}
+
+// admin 短路归属:改他人 draft 卷 → 放行写库。
+func TestUpdate_Admin_CrossOwner_Writes(t *testing.T) {
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}}
+	m := New(f)
+	if _, err := m.Update(ctxRole("admin-user", "admin"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)}); err != nil {
+		t.Fatalf("admin 跨 owner 改 draft 应放行,得到 %v", err)
+	}
+	if !f.updateCalled {
+		t.Fatal("admin 改他人 draft 应写库")
+	}
+}
+
+// List:admin → 走全站列表;creator → 走本人列表。
+func TestList_RoleScopes(t *testing.T) {
+	fa := &fakeStore{allItems: []dao.SurveyListItem{{ID: "x"}}}
+	if _, err := New(fa).List(ctxRole("admin-user", "admin")); err != nil {
+		t.Fatalf("admin List 应成功,得到 %v", err)
+	}
+	if !fa.listAllCalled {
+		t.Fatal("admin List 应走全站 ListAllSurveys")
+	}
+
+	fc := &fakeStore{ownerItems: []dao.SurveyListItem{{ID: "y"}}}
+	if _, err := New(fc).List(ctxRole("alice", "creator")); err != nil {
+		t.Fatalf("creator List 应成功,得到 %v", err)
+	}
+	if fc.listAllCalled || fc.listOwner != "alice" {
+		t.Fatalf("creator List 应按本人过滤(listOwner=%q, listAll=%v)", fc.listOwner, fc.listAllCalled)
+	}
+}
+
+// List:respondent → 403(无列问卷能力)。
+func TestList_Respondent_ReturnsForbidden403(t *testing.T) {
+	f := &fakeStore{}
+	_, err := New(f).List(ctxRole("bob", "respondent"))
+	if got := codeOf(t, err); got != ecode.CodeForbidden {
+		t.Fatalf("respondent List code = %d, want CodeForbidden(403)", got)
+	}
+}
+
+// Publish:传 login_required 时写入该模式;缺省回落 anonymous。
+func TestPublish_AnswerAccess(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
+	if _, err := New(f).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1", AnswerAccess: "login_required"}); err != nil {
+		t.Fatalf("发布应成功,得到 %v", err)
+	}
+	if f.publishedAccess != "login_required" {
+		t.Fatalf("Publish 应写入 login_required,得到 %q", f.publishedAccess)
+	}
+
+	f2 := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
+	if _, err := New(f2).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1"}); err != nil {
+		t.Fatalf("发布应成功,得到 %v", err)
+	}
+	if f2.publishedAccess != "anonymous" {
+		t.Fatalf("缺省应回落 anonymous,得到 %q", f2.publishedAccess)
 	}
 }
 

@@ -116,6 +116,87 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 	}
 }
 
+// ctxRole 造一个「已登录」ctx:带真实会话身份(UserID)+ 角色。
+// UserID 非空 = submission 据此判定为已登录路径(等价 requireAuth 注入后的 ctx)。
+func ctxRole(role string) context.Context {
+	return api.WithMetadata(context.Background(), api.Metadata{UserID: "u_" + role, Role: role})
+}
+
+// 作答模式闸门:login_required 问卷经匿名路径提交 → NotFound(不泄露需登录)。
+func TestSubmit_LoginRequired_AnonPath_ReturnsNotFound(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}}) // 无 UserID = 匿名
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("login_required 匿名提交 code = %d, want CodeNotFound", got)
+	}
+	if f.saveCalled {
+		t.Fatal("闸门拦下不应落库")
+	}
+}
+
+// 作答模式闸门:anonymous 问卷经鉴权路径提交 → BadRequest(引导走 /public)。
+func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("anonymous 鉴权提交 code = %d, want CodeBadRequest", got)
+	}
+}
+
+// 能力位:creator 经鉴权路径提交 login_required 问卷 → 403(creator 不能作答)。
+func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if got := codeOf(t, err); got != ecode.CodeForbidden {
+		t.Fatalf("creator 鉴权作答 code = %d, want CodeForbidden(403)", got)
+	}
+	if f.saveCalled {
+		t.Fatal("能力位拦下不应落库")
+	}
+}
+
+// respondent 经鉴权路径提交 login_required 问卷 → 成功落库。
+func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	res, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if err != nil || len(res.ValidationErrors) > 0 {
+		t.Fatalf("respondent 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	}
+	if !f.saveCalled {
+		t.Fatal("应落库")
+	}
+}
+
+// admin 经鉴权路径提交 login_required 问卷 → 成功(超级权限保留作答)。
+func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	res, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if err != nil || len(res.ValidationErrors) > 0 {
+		t.Fatalf("admin 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	}
+	if !f.saveCalled {
+		t.Fatal("应落库")
+	}
+}
+
+// 匿名问卷经匿名路径提交(现状)→ 成功,行为不变。
+func TestSubmit_Anonymous_AnonPath_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
+	m := New(f)
+	res, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	if err != nil || len(res.ValidationErrors) > 0 {
+		t.Fatalf("匿名问卷匿名提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	}
+	if !f.saveCalled {
+		t.Fatal("应落库")
+	}
+}
+
 // GetPublished:未发布 → NotFound。
 func TestGetPublished_NotFound_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{publishedErr: dao.ErrNotFound}

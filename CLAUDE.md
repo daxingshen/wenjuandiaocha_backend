@@ -79,6 +79,6 @@ wire 字段名严格对齐前端 `packages/engine/src/schema.ts`,前端无适配
 ## 工程约定
 
 - 中文写作(注释/文档),与前端仓一致。
-- sqlc 生成物在 `internal/dao/gen/`,**不手改**;改查询改 `queries/*.sql` 后 `make sqlc`。
+- **生成代码永不手改**(带 `Code generated ... DO NOT EDIT` 头的文件):sqlc 生成物 `internal/dao/gen/`、wire 生成物 `internal/di/wire_gen.go`。改源(`queries/*.sql`、迁移、provider set / `wire.go`)后跑工具重生成(`make sqlc` / `make wire`),不直接编辑生成物。
 - 事务(双写、发布快照)在 `dao.go` 手写,单条 SQL 交 sqlc。
 - 无鉴权的 public 端点在代码/README 显式标注公开 + 防滥用现状。

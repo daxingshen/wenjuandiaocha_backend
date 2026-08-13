@@ -75,9 +75,18 @@ func (s *Server) updateSurvey(c *gin.Context) {
 	render.Success(c, nil)
 }
 
-// publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live。
+// publishReq 发布请求可选体:answerAccess 指定作答访问模式(D6)。
+// 缺省(空体/旧客户端)→ service 回落 anonymous,维持现状。
+type publishReq struct {
+	AnswerAccess string `json:"answerAccess"`
+}
+
+// publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live + 设作答模式。
 func (s *Server) publishSurvey(c *gin.Context) {
-	resp, err := s.surveys.Publish(c.Request.Context(), api.SurveyPublishReq{ID: c.Param("id")})
+	// 体可选:忽略绑定错误(空体/非法体一律回落 service 默认 anonymous),不因缺体而 400。
+	var body publishReq
+	_ = c.ShouldBindJSON(&body)
+	resp, err := s.surveys.Publish(c.Request.Context(), api.SurveyPublishReq{ID: c.Param("id"), AnswerAccess: body.AnswerAccess})
 	if err != nil {
 		render.Error(c, err)
 		return
@@ -102,6 +111,32 @@ func (s *Server) reopenSurvey(c *gin.Context) {
 		return
 	}
 	render.Success(c, nil)
+}
+
+// submitAnswersAuthed POST /api/surveys/:id/answers —— 需登录作答(login_required 问卷)。
+// 已过 requireAuth(会话有效 + ctx 带 role);作答能力位(respondent/admin,creator 被拒 403)
+// 与作答模式匹配(仅 login_required)由 submission service 判定。权威校验/落库同匿名路径。
+func (s *Server) submitAnswersAuthed(c *gin.Context) {
+	var req submitReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	// 不传登录标记 —— submission 从 ctx 的会话身份(requireAuth 注入的 UserID)自行确认已登录。
+	res, err := s.submissions.Submit(c.Request.Context(), api.SubmitReq{
+		SurveyID: c.Param("id"),
+		Answers:  req.Answers,
+		Version:  req.Version,
+	})
+	if err != nil {
+		render.Error(c, err)
+		return
+	}
+	if len(res.ValidationErrors) > 0 {
+		render.Validation(c, res.ValidationErrors)
+		return
+	}
+	render.Success(c, gin.H{"rows": res.Rows})
 }
 
 // surveyStats 对齐前端问卷概览:状态 + 已发布版本 + 答卷数。

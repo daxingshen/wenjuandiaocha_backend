@@ -46,18 +46,30 @@ func (q *Queries) DeleteSession(ctx context.Context, token string) error {
 }
 
 const getSession = `-- name: GetSession :one
-SELECT token, user_id, expires_at, created_at
-FROM sessions WHERE token = $1
+SELECT s.token, s.user_id, s.expires_at, s.created_at, u.role
+FROM sessions s
+JOIN users u ON u.id = s.user_id
+WHERE s.token = $1
 `
 
-func (q *Queries) GetSession(ctx context.Context, token string) (Session, error) {
+type GetSessionRow struct {
+	Token     string
+	UserID    string
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+	Role      string
+}
+
+// 带出会话用户的 role,供 RequireAuth 一并注入 ctx metadata(判定层零额外查库)。
+func (q *Queries) GetSession(ctx context.Context, token string) (GetSessionRow, error) {
 	row := q.db.QueryRow(ctx, getSession, token)
-	var i Session
+	var i GetSessionRow
 	err := row.Scan(
 		&i.Token,
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.Role,
 	)
 	return i, err
 }

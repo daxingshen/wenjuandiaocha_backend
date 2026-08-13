@@ -12,3 +12,11 @@ const (
 	StatusLive   = "live"   // 进行中:已发布、正在回收答卷
 	StatusClosed = "closed" // 已截止:暂停回收(曾发布过可 reopen)
 )
+
+// 问卷作答访问模式(surveys.answer_access 列,发布时设定)。同为后端权威的问卷级配置,
+// 决定谁能提交答卷:anonymous 免登录走 /public;login_required 需登录且有作答能力(respondent/admin)。
+// 与生命周期 status 正交。集中定义避免各处散字符串漂移。
+const (
+	AnswerAnonymous     = "anonymous"      // 匿名作答(默认,维持现状):任何人免登录,走 /api/public
+	AnswerLoginRequired = "login_required" // 需登录作答:过 requireAuth + 作答能力位,走鉴权提交端点
+)

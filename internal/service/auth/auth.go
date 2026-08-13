@@ -19,7 +19,7 @@ type Store interface {
 	GetUserByAccount(ctx context.Context, account string) (dao.User, error)
 	GetUserByID(ctx context.Context, id string) (dao.User, error)
 	CreateSession(ctx context.Context, token, userID string, expires time.Time) error
-	GetSession(ctx context.Context, token string) (userID string, expires time.Time, err error)
+	GetSession(ctx context.Context, token string) (userID, role string, expires time.Time, err error)
 	DeleteSession(ctx context.Context, token string) error
 }
 
@@ -68,7 +68,7 @@ func (m *Manager) Login(ctx context.Context, req api.AuthLoginReq) (api.AuthLogi
 	if err := m.store.CreateSession(ctx, token, u.ID, expires); err != nil {
 		return api.AuthLoginResp{}, err
 	}
-	return api.AuthLoginResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Level: u.Level}, Token: token, Expires: expires}, nil
+	return api.AuthLoginResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Role: u.Role}, Token: token, Expires: expires}, nil
 }
 
 // Logout 删会话(token 从 ctx metadata 取;为空则无操作)。
@@ -85,14 +85,14 @@ func (m *Manager) Me(ctx context.Context) (api.AuthMeResp, error) {
 	if err != nil {
 		return api.AuthMeResp{}, err
 	}
-	return api.AuthMeResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Level: u.Level}}, nil
+	return api.AuthMeResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Role: u.Role}}, nil
 }
 
 // ValidateSession 校验会话 token:查无/无效 → Unauthorized("会话无效");
 // 已过期 → 删除并 Unauthorized("会话已过期");有效返回 userID。空 token 由传输层先行拦截。
 func (m *Manager) ValidateSession(ctx context.Context) (api.AuthValidateSessionResp, error) {
 	token := api.MetadataFrom(ctx).Token
-	uid, expires, err := m.store.GetSession(ctx, token)
+	uid, role, expires, err := m.store.GetSession(ctx, token)
 	if err != nil {
 		return api.AuthValidateSessionResp{}, ecode.Unauthorized("会话无效")
 	}
@@ -100,5 +100,5 @@ func (m *Manager) ValidateSession(ctx context.Context) (api.AuthValidateSessionR
 		_ = m.store.DeleteSession(ctx, token)
 		return api.AuthValidateSessionResp{}, ecode.Unauthorized("会话已过期")
 	}
-	return api.AuthValidateSessionResp{UserID: uid}, nil
+	return api.AuthValidateSessionResp{UserID: uid, Role: role}, nil
 }

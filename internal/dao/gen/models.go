@@ -43,6 +43,7 @@ type Survey struct {
 	Status           string
 	DraftSchema      []byte
 	PublishedVersion *int32
+	AnswerAccess     string
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 }
@@ -59,6 +60,6 @@ type User struct {
 	Account      string
 	PasswordHash string
 	Name         string
-	Level        string
+	Role         string
 	CreatedAt    pgtype.Timestamptz
 }

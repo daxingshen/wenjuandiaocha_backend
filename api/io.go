@@ -24,6 +24,7 @@ import (
 // 由各传输层(http 从 session/cookie/请求、gRPC 从拦截器/metadata)填入 ctx,service 从 ctx 读。
 type Metadata struct {
 	UserID    string // 已认证用户 id(studio 端点归属校验用)
+	Role      string // 已认证用户角色 admin|creator|respondent(RBAC 能力判定用;RequireAuth 注入)
 	Token     string // 会话 token(logout/validateSession 用)
 	ClientIP  string // 客户端 IP(防刷 meta)
 	UserAgent string // 客户端 UA(防刷 meta)
@@ -45,10 +46,11 @@ func MetadataFrom(ctx context.Context) Metadata {
 // ---------- auth 域 ----------
 
 // AuthUser 对外用户信息(对齐前端 AuthUser)。
+// Role 为 RBAC 角色轴;前端可据此做体验层门控(前端同步不在本轮范围)。
 type AuthUser struct {
-	ID    string
-	Name  string
-	Level string
+	ID   string
+	Name string
+	Role string
 }
 
 type AuthLoginReq struct{ Account, Password string }
@@ -60,7 +62,10 @@ type AuthLoginResp struct {
 
 // Me/Logout/ValidateSession 无客户端入参:userID/token 走 Metadata。
 type AuthMeResp struct{ User AuthUser }
-type AuthValidateSessionResp struct{ UserID string }
+type AuthValidateSessionResp struct {
+	UserID string
+	Role   string // 会话用户角色,供中间件注入 ctx metadata
+}
 
 // ---------- survey 域 ----------
 
@@ -81,8 +86,8 @@ type SurveyCreateReq struct {
 }
 type SurveyCreateResp struct{ ID string }
 
-type SurveyGetReq struct{ ID string }         // ID 为 URL 路径参数
-type SurveyGetResp struct{ Schema []byte }    // 草稿 SurveySchema 原始 jsonb
+type SurveyGetReq struct{ ID string }      // ID 为 URL 路径参数
+type SurveyGetResp struct{ Schema []byte } // 草稿 SurveySchema 原始 jsonb
 
 type SurveyUpdateReq struct {
 	ID   string // URL 路径参数
@@ -90,7 +95,10 @@ type SurveyUpdateReq struct {
 }
 type SurveyUpdateResp struct{}
 
-type SurveyPublishReq struct{ ID string }
+type SurveyPublishReq struct {
+	ID           string
+	AnswerAccess string // anonymous|login_required(发布配置,D6);空/未知回落 anonymous
+}
 type SurveyPublishResp struct {
 	Version   int
 	Unchanged bool
@@ -118,6 +126,9 @@ type SubmitReq struct {
 	SurveyID string // URL 路径参数
 	Answers  domain.Answers
 	Version  int32 // >0 版本锚定按该历史版校验;0 回落当前发布版
+	// 是否已登录不进 Req —— 由 submission service 从 ctx 的会话身份(Metadata.UserID)
+	// 自行确认,不采信调用方声明:UserID 仅由 requireAuth 校验 session 后注入,
+	// 匿名 /public 路由无此中间件、拿不到 UserID,故后端据真实会话状态区分匿名/登录。
 }
 type SubmitResp struct {
 	Rows             int
