@@ -139,6 +139,11 @@ func (m *Manager) Update(ctx context.Context, req api.SurveyUpdateReq) (api.Surv
 	if err != nil {
 		return api.SurveyUpdateResp{}, err
 	}
+	// 状态守卫:只有草稿可编辑。已发布(live/closed)问卷内容已冻结,拒绝写库
+	// —— 前端弹窗拦截只是体验层,此处才是防绕过接口直改的真正防线。复用 owned() 已取的 meta.Status,零额外查询。
+	if meta.Status != domain.StatusDraft {
+		return api.SurveyUpdateResp{}, ecode.Conflict(msgEditForbidden)
+	}
 	var schema domain.SurveySchema
 	if err := json.Unmarshal(req.Body, &schema); err != nil {
 		return api.SurveyUpdateResp{}, ecode.BadRequest("schema 格式错误")
@@ -168,10 +173,10 @@ func (m *Manager) Close(ctx context.Context, req api.SurveyCloseReq) (api.Survey
 	if err != nil {
 		return api.SurveyCloseResp{}, err
 	}
-	if meta.Status != "live" {
-		return api.SurveyCloseResp{}, ecode.Conflict("仅进行中的问卷可结束")
+	if meta.Status != domain.StatusLive {
+		return api.SurveyCloseResp{}, ecode.Conflict(msgCloseNotLive)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, "closed"); err != nil {
+	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusClosed); err != nil {
 		return api.SurveyCloseResp{}, err
 	}
 	return api.SurveyCloseResp{}, nil
@@ -183,10 +188,10 @@ func (m *Manager) Reopen(ctx context.Context, req api.SurveyReopenReq) (api.Surv
 	if err != nil {
 		return api.SurveyReopenResp{}, err
 	}
-	if meta.Status != "closed" || meta.PublishedVersion == nil {
-		return api.SurveyReopenResp{}, ecode.Conflict("仅已结束且曾发布过的问卷可重新打开")
+	if meta.Status != domain.StatusClosed || meta.PublishedVersion == nil {
+		return api.SurveyReopenResp{}, ecode.Conflict(msgReopenInvalid)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, "live"); err != nil {
+	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusLive); err != nil {
 		return api.SurveyReopenResp{}, err
 	}
 	return api.SurveyReopenResp{}, nil
