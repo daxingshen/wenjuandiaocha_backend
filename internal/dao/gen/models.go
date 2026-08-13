@@ -45,6 +45,7 @@ type Survey struct {
 	PublishedVersion *int32
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	AnswerAccess     string
 }
 
 type SurveyVersion struct {
@@ -61,4 +62,5 @@ type User struct {
 	Name         string
 	Level        string
 	CreatedAt    pgtype.Timestamptz
+	Role         string
 }

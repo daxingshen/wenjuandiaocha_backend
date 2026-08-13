@@ -18,12 +18,14 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
-// userResp 对齐前端 AuthUser { id, name, level }。
+// userResp 对齐前端 AuthUser { id, name, level, role }。
 // 响应体手写(不直接序列化 I/O 类型):显式 json tag,保「对外逐字节不变」。
+// role 为 RBAC 角色轴(前端体验层门控用;前端同步不在本轮范围,多返字段不破坏前端)。
 type userResp struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Level string `json:"level"`
+	Role  string `json:"role"`
 }
 
 func (s *Server) login(c *gin.Context) {
@@ -38,7 +40,7 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 	s.setSessionCookie(c, resp.Token)
-	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
+	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level, Role: resp.User.Role})
 }
 
 func (s *Server) logout(c *gin.Context) {
@@ -59,7 +61,7 @@ func (s *Server) me(c *gin.Context) {
 		render.Error(c, err)
 		return
 	}
-	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level})
+	render.Success(c, userResp{ID: resp.User.ID, Name: resp.User.Name, Level: resp.User.Level, Role: resp.User.Role})
 }
 
 func (s *Server) setSessionCookie(c *gin.Context, token string) {

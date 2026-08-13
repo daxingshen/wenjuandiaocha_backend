@@ -11,7 +11,8 @@ const (
 	CodeOK              = 0     // 成功
 	CodeBadRequest      = 40001 // 参数 / schema 格式错(原 400)
 	CodeUnauthorized    = 40101 // 未授权 / 会话无效或过期(原 401)
-	CodeNotFound        = 40401 // 不存在 / 非本人 / 未发布(原 404,含 Forbidden)
+	CodeForbidden       = 40301 // 平台能力级越权:已登录但角色无权做这类动作(原 403,RBAC 第一层)
+	CodeNotFound        = 40401 // 不存在 / 非本人 / 未发布(原 404,含资源级 Forbidden 防枚举)
 	CodeValidation      = 42201 // 提交校验失败(逐题明细走 data.errors)
 	CodeTooManyRequests = 42901 // 限频(原 429)
 	CodeConflict        = 40901 // 状态机非法跳转(原 409)
@@ -37,8 +38,14 @@ func Conflict(msg string) *Error        { return &Error{CodeConflict, msg} }
 func TooManyRequests(msg string) *Error { return &Error{CodeTooManyRequests, msg} }
 func Internal(msg string) *Error        { return &Error{CodeInternal, msg} }
 
-// Forbidden 归属校验失败:对外一律回「不存在」不泄露存在性(与现有 ownedSurvey 语义一致)。
+// Forbidden 资源级归属校验失败:对外一律回「不存在」不泄露存在性(与现有 ownedSurvey 语义一致)。
+// 用于「跨用户访问他人资源」——非 owner 且非 admin 时,防资源枚举。
 func Forbidden() *Error { return &Error{CodeNotFound, "不存在"} }
+
+// Forbidden403 平台能力级越权:已登录但角色无权做这类动作(RBAC 第一层 can() 不通过)。
+// 与 Forbidden() 分用 —— 该动作本无「资源归属」可言(如非 admin 调账号管理、respondent 调创作端、
+// creator 调作答提交),直白告知无权更清晰,且无枚举风险,故用真 403 而非伪装 404。
+func Forbidden403(msg string) *Error { return &Error{CodeForbidden, msg} }
 
 // FromError 从任意 error 提取 (业务code, 消息)。
 // 非 ecode.Error(未预期的内部错误)归 CodeInternal + 通用文案,ok=false 供调用方决定是否记日志。

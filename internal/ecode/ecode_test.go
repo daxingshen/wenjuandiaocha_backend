@@ -20,6 +20,7 @@ func TestFromError_ExtractsCodeAndMsg(t *testing.T) {
 		{"conflict", Conflict("仅进行中的问卷可结束"), CodeConflict, "仅进行中的问卷可结束", true},
 		{"toomany", TooManyRequests("提交过于频繁,请稍后再试"), CodeTooManyRequests, "提交过于频繁,请稍后再试", true},
 		{"forbidden", Forbidden(), CodeNotFound, "不存在", true},
+		{"forbidden403", Forbidden403("无权限"), CodeForbidden, "无权限", true},
 		{"plain", errors.New("boom"), CodeInternal, "内部错误", false},
 	}
 	for _, tc := range cases {

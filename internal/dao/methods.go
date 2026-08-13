@@ -17,11 +17,12 @@ type User struct {
 	PasswordHash string
 	Name         string
 	Level        string
+	Role         string // 账号角色 admin|creator|respondent(RBAC 角色轴,正交于 Level)
 }
 
 func (s *Store) CreateUser(ctx context.Context, u User) error {
 	return s.q.CreateUser(ctx, gen.CreateUserParams{
-		ID: u.ID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Level: u.Level,
+		ID: u.ID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Level: u.Level, Role: u.Role,
 	})
 }
 
@@ -30,7 +31,7 @@ func (s *Store) GetUserByAccount(ctx context.Context, account string) (User, err
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level}, nil
+	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level, Role: r.Role}, nil
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -38,7 +39,7 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level}, nil
+	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Level: r.Level, Role: r.Role}, nil
 }
 
 // ---------- 会话 ----------
@@ -49,13 +50,14 @@ func (s *Store) CreateSession(ctx context.Context, token, userID string, expires
 	})
 }
 
-// GetSession 返回 (userID, expiresAt);查无返回 ErrNotFound。
-func (s *Store) GetSession(ctx context.Context, token string) (userID string, expires time.Time, err error) {
+// GetSession 返回 (userID, role, expiresAt);查无返回 ErrNotFound。
+// role 由 sessions→users join 带出,供 RequireAuth 一并注入 ctx metadata。
+func (s *Store) GetSession(ctx context.Context, token string) (userID, role string, expires time.Time, err error) {
 	r, err := s.q.GetSession(ctx, token)
 	if err != nil {
-		return "", time.Time{}, notFound(err)
+		return "", "", time.Time{}, notFound(err)
 	}
-	return r.UserID, r.ExpiresAt.Time, nil
+	return r.UserID, r.Role, r.ExpiresAt.Time, nil
 }
 
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
@@ -72,6 +74,7 @@ type SurveyMeta struct {
 	Status           string
 	DraftSchema      []byte
 	PublishedVersion *int32
+	AnswerAccess     string // anonymous|login_required:谁能作答(发布时设定,D6)
 }
 
 func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte) error {
@@ -87,7 +90,7 @@ func (s *Store) GetSurvey(ctx context.Context, id string) (SurveyMeta, error) {
 	}
 	return SurveyMeta{
 		ID: r.ID, OwnerID: r.OwnerID, Type: r.Type, Title: r.Title, Status: r.Status,
-		DraftSchema: r.DraftSchema, PublishedVersion: r.PublishedVersion,
+		DraftSchema: r.DraftSchema, PublishedVersion: r.PublishedVersion, AnswerAccess: r.AnswerAccess,
 	}, nil
 }
 
@@ -102,6 +105,21 @@ type SurveyListItem struct {
 
 func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string) ([]SurveyListItem, error) {
 	rows, err := s.q.ListSurveysByOwner(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SurveyListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SurveyListItem{
+			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+// ListAllSurveys 列出全站问卷(admin 全站视角,不限 owner)。
+func (s *Store) ListAllSurveys(ctx context.Context) ([]SurveyListItem, error) {
+	rows, err := s.q.ListAllSurveys(ctx)
 	if err != nil {
 		return nil, err
 	}

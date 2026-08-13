@@ -50,13 +50,26 @@ func (q *Queries) GetPublishedSchema(ctx context.Context, id string) ([]byte, er
 }
 
 const getSurvey = `-- name: GetSurvey :one
-SELECT id, owner_id, type, title, status, draft_schema, published_version, created_at, updated_at
+SELECT id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
 FROM surveys WHERE id = $1
 `
 
-func (q *Queries) GetSurvey(ctx context.Context, id string) (Survey, error) {
+type GetSurveyRow struct {
+	ID               string
+	OwnerID          string
+	Type             string
+	Title            string
+	Status           string
+	DraftSchema      []byte
+	PublishedVersion *int32
+	AnswerAccess     string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetSurvey(ctx context.Context, id string) (GetSurveyRow, error) {
 	row := q.db.QueryRow(ctx, getSurvey, id)
-	var i Survey
+	var i GetSurveyRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerID,
@@ -65,6 +78,7 @@ func (q *Queries) GetSurvey(ctx context.Context, id string) (Survey, error) {
 		&i.Status,
 		&i.DraftSchema,
 		&i.PublishedVersion,
+		&i.AnswerAccess,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -105,6 +119,47 @@ type InsertVersionParams struct {
 func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) error {
 	_, err := q.db.Exec(ctx, insertVersion, arg.SurveyID, arg.Version, arg.Schema)
 	return err
+}
+
+const listAllSurveys = `-- name: ListAllSurveys :many
+SELECT id, title, type, status, updated_at
+FROM surveys
+ORDER BY created_at DESC
+`
+
+type ListAllSurveysRow struct {
+	ID        string
+	Title     string
+	Type      string
+	Status    string
+	UpdatedAt pgtype.Timestamptz
+}
+
+// admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
+func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, error) {
+	rows, err := q.db.Query(ctx, listAllSurveys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllSurveysRow
+	for rows.Next() {
+		var i ListAllSurveysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Type,
+			&i.Status,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSurveysByOwner = `-- name: ListSurveysByOwner :many
@@ -161,17 +216,19 @@ func (q *Queries) MaxVersion(ctx context.Context, surveyID string) (int32, error
 
 const setPublished = `-- name: SetPublished :exec
 UPDATE surveys
-SET published_version = $2, status = 'live', updated_at = now()
+SET published_version = $2, status = 'live', answer_access = $3, updated_at = now()
 WHERE id = $1
 `
 
 type SetPublishedParams struct {
 	ID               string
 	PublishedVersion *int32
+	AnswerAccess     string
 }
 
+// 发布时一并写入作答访问模式(anonymous|login_required):谁能作答是发布配置(D6)。
 func (q *Queries) SetPublished(ctx context.Context, arg SetPublishedParams) error {
-	_, err := q.db.Exec(ctx, setPublished, arg.ID, arg.PublishedVersion)
+	_, err := q.db.Exec(ctx, setPublished, arg.ID, arg.PublishedVersion, arg.AnswerAccess)
 	return err
 }
 

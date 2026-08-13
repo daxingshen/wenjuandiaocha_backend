@@ -28,6 +28,7 @@ func main() {
 	password := getenv("SEED_PASSWORD", "admin123")
 	name := getenv("SEED_NAME", "管理员")
 	level := getenv("SEED_LEVEL", "pro")
+	role := getenv("SEED_ROLE", "admin") // 预置账号=平台管理员(RBAC 角色轴,正交于 level)
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -49,12 +50,12 @@ func main() {
 		slog.Error("密码哈希失败", "err", err)
 		os.Exit(1)
 	}
-	u := dao.User{ID: "u_" + randSuffix(), Account: account, PasswordHash: hash, Name: name, Level: level}
+	u := dao.User{ID: "u_" + randSuffix(), Account: account, PasswordHash: hash, Name: name, Level: level, Role: role}
 	if err := st.CreateUser(ctx, u); err != nil {
 		slog.Error("建账号失败", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("seed 账号已建", "account", account, "id", u.ID, "level", level)
+	slog.Info("seed 账号已建", "account", account, "id", u.ID, "level", level, "role", role)
 }
 
 func getenv(k, def string) string {

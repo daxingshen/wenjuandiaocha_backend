@@ -15,6 +15,7 @@ import (
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/id"
+	"wenjuandiaocha_backend/internal/rbac"
 )
 
 // Store 是本层依赖的 dao 子集(消费方定义接口,便于单测)。*dao.Store 实现它。
@@ -61,6 +62,12 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。
 // 校验失败通过 SubmitResp.ValidationErrors 返回(传输层据此回 400 + {errors}),error 仍为 nil。
 func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error) {
+	// 鉴权路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。
+	// 匿名路径(Authenticated=false)无账号、不查能力位,走 anonymous 问卷分支。
+	if req.Authenticated && !rbac.Can(rbac.Role(api.MetadataFrom(ctx).Role), rbac.ActionSubmitAnswer) {
+		return api.SubmitResp{}, ecode.Forbidden403("当前账号无作答权限")
+	}
+
 	// 收答前置:问卷必须存在且 status=live(close 后停收)。
 	survey, err := m.store.GetSurvey(ctx, req.SurveyID)
 	if err != nil {
@@ -71,6 +78,18 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 	}
 	if survey.Status != domain.StatusLive {
 		return api.SubmitResp{}, ecode.NotFound("问卷不存在或未发布")
+	}
+
+	// 作答访问模式闸门(D5):问卷的 answer_access 与提交路径必须匹配。
+	//   - login_required 问卷:仅鉴权路径可提交;匿名 /public 路径提交 → 视同不存在(不泄露该问卷需登录)。
+	//   - anonymous 问卷:仅匿名路径提交;鉴权路径不服务它 → BadRequest 引导走 /public(职责单一)。
+	// 空/历史值(迁移默认 anonymous)按 anonymous 处理。
+	loginRequired := survey.AnswerAccess == domain.AnswerLoginRequired
+	if loginRequired && !req.Authenticated {
+		return api.SubmitResp{}, ecode.NotFound("问卷不存在或未发布")
+	}
+	if !loginRequired && req.Authenticated {
+		return api.SubmitResp{}, ecode.BadRequest("该问卷为匿名作答,请通过公开链接提交")
 	}
 
 	// 载入快照 —— 校验/规范化以它为准,不信任客户端传的 schema。

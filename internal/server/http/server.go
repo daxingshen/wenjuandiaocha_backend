@@ -72,6 +72,9 @@ func (s *Server) Router() *gin.Engine {
 		sv.POST("/:id/close", s.closeSurvey)
 		sv.POST("/:id/reopen", s.reopenSurvey)
 		sv.GET("/:id/stats", s.surveyStats)
+		// 需登录作答(login_required 问卷):过 requireAuth + 作答能力位(respondent/admin)。
+		// 与匿名 /public 提交并存;anonymous 问卷仍走 /public。
+		sv.POST("/:id/answers", s.submitAnswersAuthed)
 	}
 
 	return r

@@ -34,8 +34,9 @@ func RequireAuth(svc svcauth.Service) gin.HandlerFunc {
 			render.Error(c, verr)
 			return
 		}
-		// 校验通过:补 userID,替换 request ctx 供下游 handler。
+		// 校验通过:补 userID + role(RBAC 能力判定用),替换 request ctx 供下游 handler。
 		md.UserID = resp.UserID
+		md.Role = resp.Role
 		c.Request = c.Request.WithContext(api.WithMetadata(ctx, md))
 		c.Next()
 	}
