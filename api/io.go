@@ -120,7 +120,14 @@ type SurveyStatsResp struct {
 // ---------- submission 域 ----------
 
 type GetPublishedReq struct{ ID string }
-type GetPublishedResp struct{ Schema []byte } // 已发布快照 SurveySchema 原始 jsonb
+
+// GetPublishedResp 已发布快照 + 作答访问模式。
+// AnswerAccess(anonymous|login_required)让前端在加载阶段即知该走匿名还是登录作答路径,
+// 无需靠提交失败反推(呼应 260813-respondent-fill-page 方案A)。
+type GetPublishedResp struct {
+	Schema       []byte // 已发布快照 SurveySchema 原始 jsonb
+	AnswerAccess string // anonymous|login_required(问卷级配置,发布时设定)
+}
 
 type SubmitReq struct {
 	SurveyID string // URL 路径参数
