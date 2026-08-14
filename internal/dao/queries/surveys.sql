@@ -23,9 +23,15 @@ SET draft_schema = $2, title = $3, type = $4, updated_at = now()
 WHERE id = $1;
 
 -- name: SetPublished :exec
--- 发布时一并写入作答访问模式(anonymous|login_required):谁能作答是发布配置(D6)。
+-- 只冻结版本 + 转 live;不碰 answer_access —— 作答模式由 draft 阶段经 SetAnswerAccess 设定(单一真相源)。
 UPDATE surveys
-SET published_version = $2, status = 'live', answer_access = $3, updated_at = now()
+SET published_version = $2, status = 'live', updated_at = now()
+WHERE id = $1;
+
+-- name: SetAnswerAccess :exec
+-- 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
+UPDATE surveys
+SET answer_access = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: SetStatus :exec

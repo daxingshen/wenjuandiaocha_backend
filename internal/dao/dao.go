@@ -81,11 +81,11 @@ func (s *Store) SaveSubmission(ctx context.Context, respID, surveyID string, ver
 // --------- 发布:快照 draft_schema → survey_versions + 更新指针,单事务 ---------
 
 // Publish 冻结当前草稿为新版本快照,并把 surveys 指向它、status=live、写入作答访问模式。返回 (新版本号, 是否免发).
-// answerAccess(anonymous|login_required)是发布配置(D6):谁能作答;每次发布/重发都会写入。
+// 发布只冻结版本 + 转 live,不碰 answer_access —— 作答模式是 draft 阶段经 SetAnswerAccess 设定的独立列,
+// 单一真相源,发布不动它(消除发布与作答模式的双写)。
 // 免发(unchanged=true):待发布草稿与「当前对外版本」内容一致时,不造新版本、不动指针,
 // 返回当前版本号——避免重新发布空转出无意义的版本膨胀。首发(无历史版)不判等,照常发。
-// 注意:免发时不改 answer_access(既未造新版也不动指针,作答模式沿用上次发布值)。
-func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte, answerAccess string) (int, bool, error) {
+func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte) (int, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("begin tx: %w", err)
@@ -127,7 +127,7 @@ func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte
 		return 0, false, fmt.Errorf("insert version: %w", err)
 	}
 	if err := q.SetPublished(ctx, gen.SetPublishedParams{
-		ID: surveyID, PublishedVersion: ptrInt32(int32(next)), AnswerAccess: answerAccess,
+		ID: surveyID, PublishedVersion: ptrInt32(int32(next)),
 	}); err != nil {
 		return 0, false, fmt.Errorf("set published: %w", err)
 	}

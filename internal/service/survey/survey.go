@@ -25,7 +25,8 @@ type Store interface {
 	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte) error
 	UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error
 	SetStatus(ctx context.Context, id, status string) error
-	Publish(ctx context.Context, surveyID string, draftSchema []byte, answerAccess string) (int, bool, error)
+	SetAnswerAccess(ctx context.Context, id, access string) error
+	Publish(ctx context.Context, surveyID string, draftSchema []byte) (int, bool, error)
 	CountResponses(ctx context.Context, id string) (int32, error)
 }
 
@@ -39,6 +40,7 @@ type Service interface {
 	Create(ctx context.Context, req api.SurveyCreateReq) (api.SurveyCreateResp, error)
 	Get(ctx context.Context, req api.SurveyGetReq) (api.SurveyGetResp, error)
 	Update(ctx context.Context, req api.SurveyUpdateReq) (api.SurveyUpdateResp, error)
+	SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAccessReq) (api.SurveySetAnswerAccessResp, error)
 	Publish(ctx context.Context, req api.SurveyPublishReq) (api.SurveyPublishResp, error)
 	Close(ctx context.Context, req api.SurveyCloseReq) (api.SurveyCloseResp, error)
 	Reopen(ctx context.Context, req api.SurveyReopenReq) (api.SurveyReopenResp, error)
@@ -194,24 +196,43 @@ func (m *Manager) Update(ctx context.Context, req api.SurveyUpdateReq) (api.Surv
 }
 
 // Publish 冻结草稿为新版本快照 + status=live。Unchanged=true 表示草稿与当前对外版一致(重发免空版)。
+// 作答访问模式不在此设定:它是 draft 阶段经 SetAnswerAccess 定的独立列,发布不碰(单一真相源)。
 func (m *Manager) Publish(ctx context.Context, req api.SurveyPublishReq) (api.SurveyPublishResp, error) {
 	if err := authorize(ctx, rbac.ActionSurveyPublish); err != nil {
 		return api.SurveyPublishResp{}, err
-	}
-	// 作答访问模式(D6):发布时设定。缺省/未知值回落 anonymous(维持现状,不误开放 login_required)。
-	answerAccess := domain.AnswerAnonymous
-	if req.AnswerAccess == domain.AnswerLoginRequired {
-		answerAccess = domain.AnswerLoginRequired
 	}
 	meta, err := m.owned(ctx, req.ID)
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
-	version, unchanged, err := m.store.Publish(ctx, meta.ID, meta.DraftSchema, answerAccess)
+	version, unchanged, err := m.store.Publish(ctx, meta.ID, meta.DraftSchema)
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
 	return api.SurveyPublishResp{Version: version, Unchanged: unchanged}, nil
+}
+
+// SetAnswerAccess 设作答访问模式(anonymous|login_required)。仅 draft 可改:
+// 已发布(live/closed)问卷作答模式锁定(与 Update「仅草稿可编辑」同一约束,防绕接口直改)。
+// 复用 owned() 归属校验(非 owner → 404 防枚举);值域白名单(非法 → BadRequest,不只靠列 CHECK)。
+func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAccessReq) (api.SurveySetAnswerAccessResp, error) {
+	if err := authorize(ctx, rbac.ActionSurveyUpdate); err != nil {
+		return api.SurveySetAnswerAccessResp{}, err
+	}
+	if req.AnswerAccess != domain.AnswerAnonymous && req.AnswerAccess != domain.AnswerLoginRequired {
+		return api.SurveySetAnswerAccessResp{}, ecode.BadRequest("作答访问模式非法")
+	}
+	meta, err := m.owned(ctx, req.ID)
+	if err != nil {
+		return api.SurveySetAnswerAccessResp{}, err
+	}
+	if meta.Status != domain.StatusDraft {
+		return api.SurveySetAnswerAccessResp{}, ecode.Conflict(msgEditForbidden)
+	}
+	if err := m.store.SetAnswerAccess(ctx, meta.ID, req.AnswerAccess); err != nil {
+		return api.SurveySetAnswerAccessResp{}, err
+	}
+	return api.SurveySetAnswerAccessResp{}, nil
 }
 
 // Close 结束回收(live → closed)。状态机守卫:仅 live 可结束。
@@ -263,5 +284,9 @@ func (m *Manager) Stats(ctx context.Context, req api.SurveyStatsReq) (api.Survey
 	if err != nil {
 		return api.SurveyStatsResp{}, err
 	}
-	return api.SurveyStatsResp{Status: meta.Status, PublishedVersion: meta.PublishedVersion, ResponseCount: count}, nil
+	access := meta.AnswerAccess
+	if access == "" {
+		access = domain.AnswerAnonymous
+	}
+	return api.SurveyStatsResp{Status: meta.Status, PublishedVersion: meta.PublishedVersion, ResponseCount: count, AnswerAccess: access}, nil
 }

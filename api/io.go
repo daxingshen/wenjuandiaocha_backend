@@ -95,14 +95,19 @@ type SurveyUpdateReq struct {
 }
 type SurveyUpdateResp struct{}
 
-type SurveyPublishReq struct {
-	ID           string
-	AnswerAccess string // anonymous|login_required(发布配置,D6);空/未知回落 anonymous
-}
+// SurveyPublishReq 发布只需 ID:作答模式不在发布时设定(draft 阶段经 SetAnswerAccess 定,单一真相源)。
+type SurveyPublishReq struct{ ID string }
 type SurveyPublishResp struct {
 	Version   int
 	Unchanged bool
 }
+
+// SurveySetAnswerAccessReq 设作答访问模式(仅 draft 可改,守卫在 service)。
+type SurveySetAnswerAccessReq struct {
+	ID           string
+	AnswerAccess string // anonymous|login_required
+}
+type SurveySetAnswerAccessResp struct{}
 
 type SurveyCloseReq struct{ ID string }
 type SurveyCloseResp struct{}
@@ -115,6 +120,7 @@ type SurveyStatsResp struct {
 	Status           string
 	PublishedVersion *int32
 	ResponseCount    int32
+	AnswerAccess     string // anonymous|login_required(发布页回显作答模式)
 }
 
 // ---------- submission 域 ----------

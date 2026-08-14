@@ -17,7 +17,8 @@ type fakeStore struct {
 	setStatus       string // 记录 SetStatus 实际写入的状态
 	setCalled       bool
 	publishVer      int
-	publishedAccess string // 记录 Publish 实际写入的作答模式
+	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
+	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
 	listOwner       string // 记录 ListSurveysByOwner 收到的 ownerID
 	listAllCalled   bool   // 记录是否走了全站列表(admin)
 	ownerItems      []dao.SurveyListItem
@@ -42,9 +43,13 @@ func (f *fakeStore) SetStatus(_ context.Context, _, status string) error {
 	f.setStatus = status
 	return nil
 }
-func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte, answerAccess string) (int, bool, error) {
-	f.publishedAccess = answerAccess
+func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte) (int, bool, error) {
 	return f.publishVer, false, nil
+}
+func (f *fakeStore) SetAnswerAccess(_ context.Context, _, access string) error {
+	f.setAccessCalled = true
+	f.setAccess = access
+	return nil
 }
 func (f *fakeStore) CountResponses(_ context.Context, _ string) (int32, error) { return 0, nil }
 
@@ -293,22 +298,62 @@ func TestList_Respondent_ReturnsForbidden403(t *testing.T) {
 	}
 }
 
-// Publish:传 login_required 时写入该模式;缺省回落 anonymous。
-func TestPublish_AnswerAccess(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
-	if _, err := New(f).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1", AnswerAccess: "login_required"}); err != nil {
-		t.Fatalf("发布应成功,得到 %v", err)
+// SetAnswerAccess:draft 问卷设 login_required → 写列成功。
+func TestSetAnswerAccess_Draft_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	if _, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "login_required"}); err != nil {
+		t.Fatalf("draft 设作答模式应成功,得到 %v", err)
 	}
-	if f.publishedAccess != "login_required" {
-		t.Fatalf("Publish 应写入 login_required,得到 %q", f.publishedAccess)
+	if f.setAccess != "login_required" {
+		t.Fatalf("SetAnswerAccess 应写入 login_required,得到 %q", f.setAccess)
 	}
+}
 
-	f2 := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
-	if _, err := New(f2).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1"}); err != nil {
+// SetAnswerAccess:live 问卷 → Conflict(仅 draft 可改),且不写库。
+func TestSetAnswerAccess_Live_ReturnsConflict(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
+	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"})
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("live 设作答模式 code = %d, want CodeConflict", got)
+	}
+	if f.setAccessCalled {
+		t.Fatal("守卫拦下不应写库")
+	}
+}
+
+// SetAnswerAccess:非 owner → NotFound(归属防枚举),不写库。
+func TestSetAnswerAccess_NotOwner_ReturnsNotFound(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "bob", Status: "draft"}}
+	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"})
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("非 owner code = %d, want CodeNotFound", got)
+	}
+	if f.setAccessCalled {
+		t.Fatal("归属拦下不应写库")
+	}
+}
+
+// SetAnswerAccess:非法值 → BadRequest,不写库。
+func TestSetAnswerAccess_InvalidValue_ReturnsBadRequest(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "bogus"})
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("非法值 code = %d, want CodeBadRequest", got)
+	}
+	if f.setAccessCalled {
+		t.Fatal("非法值不应写库")
+	}
+}
+
+// Publish 不再改 answer_access:发布只冻结版本 + 转 live(作答模式由 SetAnswerAccess 定,单一真相源)。
+// fakeStore.Publish 已无 answerAccess 形参,此处仅确认发布成功、不触碰作答模式写入路径。
+func TestPublish_DoesNotTouchAnswerAccess(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
+	if _, err := New(f).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1"}); err != nil {
 		t.Fatalf("发布应成功,得到 %v", err)
 	}
-	if f2.publishedAccess != "anonymous" {
-		t.Fatalf("缺省应回落 anonymous,得到 %q", f2.publishedAccess)
+	if f.setAccessCalled {
+		t.Fatal("发布不应调用 SetAnswerAccess")
 	}
 }
 

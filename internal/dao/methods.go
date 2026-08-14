@@ -143,6 +143,12 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 	return s.q.SetStatus(ctx, gen.SetStatusParams{ID: id, Status: status})
 }
 
+// SetAnswerAccess 只改 answer_access 单列(作答访问模式)。
+// 不校验状态/归属——「仅 draft + owner」守卫在 service 层(复用 owned() + 状态判断)。
+func (s *Store) SetAnswerAccess(ctx context.Context, id, access string) error {
+	return s.q.SetAnswerAccess(ctx, gen.SetAnswerAccessParams{ID: id, AnswerAccess: access})
+}
+
 // GetPublishedSchema 取已发布快照的 schema jsonb;未发布/非 live 返回 ErrNotFound。
 func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, error) {
 	b, err := s.q.GetPublishedSchema(ctx, id)
