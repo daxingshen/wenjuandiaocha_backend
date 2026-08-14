@@ -72,7 +72,7 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 }
 
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。
-// 校验失败通过 SubmitResp.ValidationErrors 返回(传输层据此回 400 + {errors}),error 仍为 nil。
+// 校验失败返回 ecode.Validation(携逐题明细 payload),由 render.JSON 渲染进信封 data:{errors:[...]}(恒200)。
 func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error) {
 	// 登录态由后端从 ctx 会话身份确认,不采信调用方声明:UserID 仅由 requireAuth 校验
 	// session 后注入(匿名 /public 路由无此中间件,UserID 恒空),故 UserID != "" ⟺ 已登录。
@@ -120,12 +120,19 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 		return api.SubmitResp{}, err
 	}
 
-	// 权威重跑:校验(隐藏题跳过)。
-	if errs := domain.ValidateSurvey(schema, req.Answers); len(errs) > 0 {
-		return api.SubmitResp{ValidationErrors: errs}, nil
+	// api.Answers 与 domain.Answers 同底层 map[string]any,边界处显式转换(api 不依赖 domain)。
+	answers := domain.Answers(req.Answers)
+	// 权威重跑:校验(隐藏题跳过)。失败 → ecode.Validation 携逐题明细,render 渲染进 data:{errors}。
+	if errs := domain.ValidateSurvey(schema, answers); len(errs) > 0 {
+		// domain.ValidationError → api.ValidationError 逐条转换(slice-of-struct 不能整体转)。
+		payload := api.ValidationErrorsPayload{Errors: make([]api.ValidationError, len(errs))}
+		for i, e := range errs {
+			payload.Errors[i] = api.ValidationError{QID: e.QID, Message: e.Message}
+		}
+		return api.SubmitResp{}, ecode.Validation(payload)
 	}
 	// 规范化:隐藏题不产行 —— 客户端多传的隐藏题答案在此被剔除。
-	rows := domain.NormalizeSurvey(schema, req.Answers)
+	rows := domain.NormalizeSurvey(schema, answers)
 
 	// raw 存客户端提交的 answers;落库规范化行以后端为准。
 	rawJSON, _ := json.Marshal(req.Answers)

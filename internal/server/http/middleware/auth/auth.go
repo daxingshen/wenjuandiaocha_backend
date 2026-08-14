@@ -31,7 +31,7 @@ func RequireAuth(svc svcauth.Service) gin.HandlerFunc {
 		ctx := api.WithMetadata(c.Request.Context(), md)
 		resp, verr := svc.ValidateSession(ctx)
 		if verr != nil {
-			render.Error(c, verr)
+			render.JSON(c, nil, verr)
 			return
 		}
 		// 校验通过:补 userID + role(RBAC 能力判定用),替换 request ctx 供下游 handler。

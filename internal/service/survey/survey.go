@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/wire"
 
@@ -115,7 +116,8 @@ func (m *Manager) List(ctx context.Context) (api.SurveyListResp, error) {
 	items := make([]api.SurveyListItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, api.SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt,
+			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status,
+			UpdatedAt: r.UpdatedAt.Format(time.RFC3339), // 对外 RFC3339 字符串(前端契约),原在 http handler 格式化,收敛后移入此处
 		})
 	}
 	return api.SurveyListResp{Items: items}, nil
