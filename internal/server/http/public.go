@@ -22,15 +22,21 @@ import (
 // submitLimiter:提交答卷限频。每 IP 平均 1 次/秒,突发 10。
 var submitLimiter = ratelimit.New(1, 10)
 
-// getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 SurveySchema。
+// publicSurveyResp 公开加载响应:已发布快照 + 作答访问模式。
+// schema 用 RawMessage 原样嵌入(不二次转义);answerAccess 让前端加载即知走匿名/登录作答路径。
+type publicSurveyResp struct {
+	Schema       json.RawMessage `json:"schema"`
+	AnswerAccess string          `json:"answerAccess"`
+}
+
+// getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 + answerAccess。
 func (s *Server) getPublicSurvey(c *gin.Context) {
 	resp, err := s.submissions.GetPublished(c.Request.Context(), api.GetPublishedReq{ID: c.Param("id")})
 	if err != nil {
 		render.Error(c, err)
 		return
 	}
-	// 快照本身就是 SurveySchema JSON,用 RawMessage 原样嵌入信封 data(不二次转义)。
-	render.Success(c, json.RawMessage(resp.Schema))
+	render.Success(c, publicSurveyResp{Schema: json.RawMessage(resp.Schema), AnswerAccess: resp.AnswerAccess})
 }
 
 type submitReq struct {

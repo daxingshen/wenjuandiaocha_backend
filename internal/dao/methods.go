@@ -76,9 +76,9 @@ type SurveyMeta struct {
 	AnswerAccess     string // anonymous|login_required:谁能作答(发布时设定,D6)
 }
 
-func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte) error {
+func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error {
 	return s.q.CreateSurvey(ctx, gen.CreateSurveyParams{
-		ID: id, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema,
+		ID: id, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess,
 	})
 }
 
@@ -141,6 +141,12 @@ func (s *Store) UpdateDraft(ctx context.Context, id, title, typ string, draftSch
 // 不校验合法性——状态机守卫在 http 层(据 SurveyMeta.Status/PublishedVersion 判断)。
 func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 	return s.q.SetStatus(ctx, gen.SetStatusParams{ID: id, Status: status})
+}
+
+// SetAnswerAccess 只改 answer_access 单列(作答访问模式)。
+// 不校验状态/归属——「仅 draft + owner」守卫在 service 层(复用 owned() + 状态判断)。
+func (s *Store) SetAnswerAccess(ctx context.Context, id, access string) error {
+	return s.q.SetAnswerAccess(ctx, gen.SetAnswerAccessParams{ID: id, AnswerAccess: access})
 }
 
 // GetPublishedSchema 取已发布快照的 schema jsonb;未发布/非 live 返回 ErrNotFound。

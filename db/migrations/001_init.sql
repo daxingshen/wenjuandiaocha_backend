@@ -32,7 +32,7 @@ CREATE TABLE surveys (
   status            TEXT NOT NULL DEFAULT 'draft',        -- draft|live|closed
   draft_schema      JSONB NOT NULL,                       -- 整份 SurveySchema(编辑中)
   published_version INT,                                  -- → survey_versions.version;未发布 NULL
-  answer_access     TEXT NOT NULL DEFAULT 'anonymous',    -- anonymous|login_required
+  answer_access     TEXT NOT NULL DEFAULT 'login_required', -- anonymous|login_required(新建默认需登录;发布前可在发布页改)
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT surveys_status_chk CHECK (status IN ('draft', 'live', 'closed')),

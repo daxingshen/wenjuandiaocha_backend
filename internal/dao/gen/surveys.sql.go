@@ -12,18 +12,21 @@ import (
 )
 
 const createSurvey = `-- name: CreateSurvey :exec
-INSERT INTO surveys (id, owner_id, type, title, status, draft_schema)
-VALUES ($1, $2, $3, $4, 'draft', $5)
+INSERT INTO surveys (id, owner_id, type, title, status, draft_schema, answer_access)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6)
 `
 
 type CreateSurveyParams struct {
-	ID          string
-	OwnerID     string
-	Type        string
-	Title       string
-	DraftSchema []byte
+	ID           string
+	OwnerID      string
+	Type         string
+	Title        string
+	DraftSchema  []byte
+	AnswerAccess string
 }
 
+// answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+// 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
 func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) error {
 	_, err := q.db.Exec(ctx, createSurvey,
 		arg.ID,
@@ -31,6 +34,7 @@ func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) erro
 		arg.Type,
 		arg.Title,
 		arg.DraftSchema,
+		arg.AnswerAccess,
 	)
 	return err
 }
@@ -201,21 +205,37 @@ func (q *Queries) MaxVersion(ctx context.Context, surveyID string) (int32, error
 	return max_version, err
 }
 
+const setAnswerAccess = `-- name: SetAnswerAccess :exec
+UPDATE surveys
+SET answer_access = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetAnswerAccessParams struct {
+	ID           string
+	AnswerAccess string
+}
+
+// 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
+func (q *Queries) SetAnswerAccess(ctx context.Context, arg SetAnswerAccessParams) error {
+	_, err := q.db.Exec(ctx, setAnswerAccess, arg.ID, arg.AnswerAccess)
+	return err
+}
+
 const setPublished = `-- name: SetPublished :exec
 UPDATE surveys
-SET published_version = $2, status = 'live', answer_access = $3, updated_at = now()
+SET published_version = $2, status = 'live', updated_at = now()
 WHERE id = $1
 `
 
 type SetPublishedParams struct {
 	ID               string
 	PublishedVersion *int32
-	AnswerAccess     string
 }
 
-// 发布时一并写入作答访问模式(anonymous|login_required):谁能作答是发布配置(D6)。
+// 只冻结版本 + 转 live;不碰 answer_access —— 作答模式由 draft 阶段经 SetAnswerAccess 设定(单一真相源)。
 func (q *Queries) SetPublished(ctx context.Context, arg SetPublishedParams) error {
-	_, err := q.db.Exec(ctx, setPublished, arg.ID, arg.PublishedVersion, arg.AnswerAccess)
+	_, err := q.db.Exec(ctx, setPublished, arg.ID, arg.PublishedVersion)
 	return err
 }
 

@@ -1,6 +1,8 @@
 -- name: CreateSurvey :exec
-INSERT INTO surveys (id, owner_id, type, title, status, draft_schema)
-VALUES ($1, $2, $3, $4, 'draft', $5);
+-- answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+-- 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
+INSERT INTO surveys (id, owner_id, type, title, status, draft_schema, answer_access)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6);
 
 -- name: GetSurvey :one
 SELECT id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
@@ -23,9 +25,15 @@ SET draft_schema = $2, title = $3, type = $4, updated_at = now()
 WHERE id = $1;
 
 -- name: SetPublished :exec
--- 发布时一并写入作答访问模式(anonymous|login_required):谁能作答是发布配置(D6)。
+-- 只冻结版本 + 转 live;不碰 answer_access —— 作答模式由 draft 阶段经 SetAnswerAccess 设定(单一真相源)。
 UPDATE surveys
-SET published_version = $2, status = 'live', answer_access = $3, updated_at = now()
+SET published_version = $2, status = 'live', updated_at = now()
+WHERE id = $1;
+
+-- name: SetAnswerAccess :exec
+-- 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
+UPDATE surveys
+SET answer_access = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: SetStatus :exec

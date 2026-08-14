@@ -68,6 +68,7 @@ func (s *Server) Router() *gin.Engine {
 		sv.POST("", s.createSurvey)
 		sv.GET("/:id", s.getSurvey)
 		sv.PUT("/:id", s.updateSurvey)
+		sv.PATCH("/:id/answer-access", s.setAnswerAccess)
 		sv.POST("/:id/publish", s.publishSurvey)
 		sv.POST("/:id/close", s.closeSurvey)
 		sv.POST("/:id/reopen", s.reopenSurvey)

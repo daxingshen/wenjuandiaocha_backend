@@ -56,7 +56,19 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 		}
 		return api.GetPublishedResp{}, err
 	}
-	return api.GetPublishedResp{Schema: b}, nil
+	// 取问卷 meta 带出 answer_access:前端据此选匿名/登录作答路径。空/历史值按 anonymous。
+	meta, err := m.store.GetSurvey(ctx, req.ID)
+	if err != nil {
+		if errors.Is(err, dao.ErrNotFound) {
+			return api.GetPublishedResp{}, ecode.NotFound("问卷不存在或未发布")
+		}
+		return api.GetPublishedResp{}, err
+	}
+	access := meta.AnswerAccess
+	if access == "" {
+		access = domain.AnswerAnonymous
+	}
+	return api.GetPublishedResp{Schema: b, AnswerAccess: access}, nil
 }
 
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。
@@ -86,12 +98,13 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 	}
 
 	// 作答访问模式闸门(D5):问卷的 answer_access 与提交路径必须匹配。
-	//   - login_required 问卷:仅鉴权路径可提交;匿名 /public 路径提交 → 视同不存在(不泄露该问卷需登录)。
+	//   - login_required 问卷:仅鉴权路径可提交;匿名 /public 路径提交(无会话)→ 401 需登录。
+	//     (公开 GET 已回显 answerAccess,该问卷需登录本就非秘密,故直白 401 而非伪装 404。)
 	//   - anonymous 问卷:仅匿名路径提交;鉴权路径不服务它 → BadRequest 引导走 /public(职责单一)。
 	// 空/历史值(迁移默认 anonymous)按 anonymous 处理。
 	loginRequired := survey.AnswerAccess == domain.AnswerLoginRequired
 	if loginRequired && !authenticated {
-		return api.SubmitResp{}, ecode.NotFound("问卷不存在或未发布")
+		return api.SubmitResp{}, ecode.Unauthorized("该问卷需登录后作答")
 	}
 	if !loginRequired && authenticated {
 		return api.SubmitResp{}, ecode.BadRequest("该问卷为匿名作答,请通过公开链接提交")

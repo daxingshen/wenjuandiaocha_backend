@@ -75,24 +75,35 @@ func (s *Server) updateSurvey(c *gin.Context) {
 	render.Success(c, nil)
 }
 
-// publishReq 发布请求可选体:answerAccess 指定作答访问模式(D6)。
-// 缺省(空体/旧客户端)→ service 回落 anonymous,维持现状。
-type publishReq struct {
-	AnswerAccess string `json:"answerAccess"`
-}
-
-// publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live + 设作答模式。
+// publishSurvey POST /api/surveys/:id/publish —— 冻结草稿为新版本快照 + status=live。
+// 不接受作答模式:它由 draft 阶段的 PATCH /answer-access 设定(单一真相源),发布不碰。
 func (s *Server) publishSurvey(c *gin.Context) {
-	// 体可选:忽略绑定错误(空体/非法体一律回落 service 默认 anonymous),不因缺体而 400。
-	var body publishReq
-	_ = c.ShouldBindJSON(&body)
-	resp, err := s.surveys.Publish(c.Request.Context(), api.SurveyPublishReq{ID: c.Param("id"), AnswerAccess: body.AnswerAccess})
+	resp, err := s.surveys.Publish(c.Request.Context(), api.SurveyPublishReq{ID: c.Param("id")})
 	if err != nil {
 		render.Error(c, err)
 		return
 	}
 	// unchanged=true:草稿与当前对外版本一致,未造新版本(重发免空版)。前端据此提示「内容未变」。
 	render.Success(c, gin.H{"version": resp.Version, "unchanged": resp.Unchanged})
+}
+
+// answerAccessReq 设作答模式的请求体。
+type answerAccessReq struct {
+	AnswerAccess string `json:"answerAccess"`
+}
+
+// setAnswerAccess PATCH /api/surveys/:id/answer-access —— 设作答访问模式(仅 draft 可改,守卫在 service)。
+func (s *Server) setAnswerAccess(c *gin.Context) {
+	var body answerAccessReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	if _, err := s.surveys.SetAnswerAccess(c.Request.Context(), api.SurveySetAnswerAccessReq{ID: c.Param("id"), AnswerAccess: body.AnswerAccess}); err != nil {
+		render.Error(c, err)
+		return
+	}
+	render.Success(c, nil)
 }
 
 // closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。状态机守卫在 service。
@@ -139,11 +150,12 @@ func (s *Server) submitAnswersAuthed(c *gin.Context) {
 	render.Success(c, gin.H{"rows": res.Rows})
 }
 
-// surveyStats 对齐前端问卷概览:状态 + 已发布版本 + 答卷数。
+// surveyStats 对齐前端问卷概览:状态 + 已发布版本 + 答卷数 + 作答模式(发布页回显)。
 type surveyStats struct {
 	Status           string `json:"status"`
 	PublishedVersion *int32 `json:"publishedVersion"`
 	ResponseCount    int32  `json:"responseCount"`
+	AnswerAccess     string `json:"answerAccess"`
 }
 
 // surveyStats GET /api/surveys/:id/stats —— 问卷概览统计。归属校验。
@@ -157,5 +169,6 @@ func (s *Server) surveyStats(c *gin.Context) {
 		Status:           st.Status,
 		PublishedVersion: st.PublishedVersion,
 		ResponseCount:    st.ResponseCount,
+		AnswerAccess:     st.AnswerAccess,
 	})
 }

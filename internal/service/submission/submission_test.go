@@ -122,13 +122,14 @@ func ctxRole(role string) context.Context {
 	return api.WithMetadata(context.Background(), api.Metadata{UserID: "u_" + role, Role: role})
 }
 
-// 作答模式闸门:login_required 问卷经匿名路径提交 → NotFound(不泄露需登录)。
-func TestSubmit_LoginRequired_AnonPath_ReturnsNotFound(t *testing.T) {
+// 作答模式闸门:login_required 问卷经匿名路径提交(无会话)→ 401 需登录。
+// 公开 GET 已回显 answerAccess,需登录本非秘密,故直白 401 而非伪装 404。
+func TestSubmit_LoginRequired_AnonPath_ReturnsUnauthorized(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}}) // 无 UserID = 匿名
-	if got := codeOf(t, err); got != ecode.CodeNotFound {
-		t.Fatalf("login_required 匿名提交 code = %d, want CodeNotFound", got)
+	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
+		t.Fatalf("login_required 匿名提交 code = %d, want CodeUnauthorized(401)", got)
 	}
 	if f.saveCalled {
 		t.Fatal("闸门拦下不应落库")
@@ -204,6 +205,36 @@ func TestGetPublished_NotFound_ReturnsNotFound(t *testing.T) {
 	_, err := m.GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
 		t.Fatalf("未发布 GetPublished code = %d, want CodeNotFound", got)
+	}
+}
+
+// GetPublished 带出 answer_access:login_required 问卷返回该模式,供前端选登录作答路径。
+func TestGetPublished_ReturnsAnswerAccess(t *testing.T) {
+	f := &fakeStore{
+		meta:          dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"},
+		publishedJSON: []byte(emptySchema),
+	}
+	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("GetPublished 应成功: %v", err)
+	}
+	if resp.AnswerAccess != "login_required" {
+		t.Fatalf("AnswerAccess = %q, want login_required", resp.AnswerAccess)
+	}
+}
+
+// GetPublished 空 answer_access(历史数据)按 anonymous 回落,不返回空串误导前端。
+func TestGetPublished_EmptyAccess_FallsBackAnonymous(t *testing.T) {
+	f := &fakeStore{
+		meta:          dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: ""},
+		publishedJSON: []byte(emptySchema),
+	}
+	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("GetPublished 应成功: %v", err)
+	}
+	if resp.AnswerAccess != "anonymous" {
+		t.Fatalf("空 access 回落 = %q, want anonymous", resp.AnswerAccess)
 	}
 }
 

@@ -95,14 +95,19 @@ type SurveyUpdateReq struct {
 }
 type SurveyUpdateResp struct{}
 
-type SurveyPublishReq struct {
-	ID           string
-	AnswerAccess string // anonymous|login_required(发布配置,D6);空/未知回落 anonymous
-}
+// SurveyPublishReq 发布只需 ID:作答模式不在发布时设定(draft 阶段经 SetAnswerAccess 定,单一真相源)。
+type SurveyPublishReq struct{ ID string }
 type SurveyPublishResp struct {
 	Version   int
 	Unchanged bool
 }
+
+// SurveySetAnswerAccessReq 设作答访问模式(仅 draft 可改,守卫在 service)。
+type SurveySetAnswerAccessReq struct {
+	ID           string
+	AnswerAccess string // anonymous|login_required
+}
+type SurveySetAnswerAccessResp struct{}
 
 type SurveyCloseReq struct{ ID string }
 type SurveyCloseResp struct{}
@@ -115,12 +120,20 @@ type SurveyStatsResp struct {
 	Status           string
 	PublishedVersion *int32
 	ResponseCount    int32
+	AnswerAccess     string // anonymous|login_required(发布页回显作答模式)
 }
 
 // ---------- submission 域 ----------
 
 type GetPublishedReq struct{ ID string }
-type GetPublishedResp struct{ Schema []byte } // 已发布快照 SurveySchema 原始 jsonb
+
+// GetPublishedResp 已发布快照 + 作答访问模式。
+// AnswerAccess(anonymous|login_required)让前端在加载阶段即知该走匿名还是登录作答路径,
+// 无需靠提交失败反推(呼应 260813-respondent-fill-page 方案A)。
+type GetPublishedResp struct {
+	Schema       []byte // 已发布快照 SurveySchema 原始 jsonb
+	AnswerAccess string // anonymous|login_required(问卷级配置,发布时设定)
+}
 
 type SubmitReq struct {
 	SurveyID string // URL 路径参数
