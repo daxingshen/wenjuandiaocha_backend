@@ -12,18 +12,21 @@ import (
 )
 
 const createSurvey = `-- name: CreateSurvey :exec
-INSERT INTO surveys (id, owner_id, type, title, status, draft_schema)
-VALUES ($1, $2, $3, $4, 'draft', $5)
+INSERT INTO surveys (id, owner_id, type, title, status, draft_schema, answer_access)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6)
 `
 
 type CreateSurveyParams struct {
-	ID          string
-	OwnerID     string
-	Type        string
-	Title       string
-	DraftSchema []byte
+	ID           string
+	OwnerID      string
+	Type         string
+	Title        string
+	DraftSchema  []byte
+	AnswerAccess string
 }
 
+// answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+// 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
 func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) error {
 	_, err := q.db.Exec(ctx, createSurvey,
 		arg.ID,
@@ -31,6 +34,7 @@ func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) erro
 		arg.Type,
 		arg.Title,
 		arg.DraftSchema,
+		arg.AnswerAccess,
 	)
 	return err
 }

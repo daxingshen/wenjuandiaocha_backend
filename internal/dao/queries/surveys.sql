@@ -1,6 +1,8 @@
 -- name: CreateSurvey :exec
-INSERT INTO surveys (id, owner_id, type, title, status, draft_schema)
-VALUES ($1, $2, $3, $4, 'draft', $5);
+-- answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+-- 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
+INSERT INTO surveys (id, owner_id, type, title, status, draft_schema, answer_access)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6);
 
 -- name: GetSurvey :one
 SELECT id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at

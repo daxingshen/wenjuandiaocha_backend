@@ -17,6 +17,7 @@ type fakeStore struct {
 	setStatus       string // 记录 SetStatus 实际写入的状态
 	setCalled       bool
 	publishVer      int
+	createdAccess   string // 记录 CreateSurvey 实际写入的作答模式(新建默认)
 	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
 	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
 	listOwner       string // 记录 ListSurveysByOwner 收到的 ownerID
@@ -36,8 +37,11 @@ func (f *fakeStore) ListAllSurveys(_ context.Context) ([]dao.SurveyListItem, err
 	f.listAllCalled = true
 	return f.allItems, nil
 }
-func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte) error { return nil }
-func (f *fakeStore) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) error     { return nil }
+func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess string) error {
+	f.createdAccess = answerAccess
+	return nil
+}
+func (f *fakeStore) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) error { return nil }
 func (f *fakeStore) SetStatus(_ context.Context, _, status string) error {
 	f.setCalled = true
 	f.setStatus = status
@@ -200,6 +204,10 @@ func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 	}
 	if resp.ID == "" {
 		t.Fatalf("Create 应返回后端分配的非空 id")
+	}
+	// 新建默认作答模式由代码显式写入 login_required(不依赖列 DEFAULT)。
+	if f.createdAccess != "login_required" {
+		t.Fatalf("Create 应写入 login_required 默认,得到 %q", f.createdAccess)
 	}
 }
 

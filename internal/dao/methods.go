@@ -76,9 +76,9 @@ type SurveyMeta struct {
 	AnswerAccess     string // anonymous|login_required:谁能作答(发布时设定,D6)
 }
 
-func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte) error {
+func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error {
 	return s.q.CreateSurvey(ctx, gen.CreateSurveyParams{
-		ID: id, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema,
+		ID: id, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess,
 	})
 }
 

@@ -22,7 +22,7 @@ type Store interface {
 	GetSurvey(ctx context.Context, id string) (dao.SurveyMeta, error)
 	ListSurveysByOwner(ctx context.Context, ownerID string) ([]dao.SurveyListItem, error)
 	ListAllSurveys(ctx context.Context) ([]dao.SurveyListItem, error)
-	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte) error
+	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error
 	UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error
 	SetStatus(ctx context.Context, id, status string) error
 	SetAnswerAccess(ctx context.Context, id, access string) error
@@ -153,7 +153,8 @@ func (m *Manager) Create(ctx context.Context, req api.SurveyCreateReq) (api.Surv
 		schema.Rules = []domain.LogicRule{}
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	if err := m.store.CreateSurvey(ctx, newid, ownerID, string(schema.Type), schema.Title, schemaJSON); err != nil {
+	// 新建默认作答模式由代码显式指定(不依赖列 DEFAULT),消除「已建库未 ALTER」漂移。
+	if err := m.store.CreateSurvey(ctx, newid, ownerID, string(schema.Type), schema.Title, schemaJSON, domain.AnswerLoginRequired); err != nil {
 		return api.SurveyCreateResp{}, err
 	}
 	return api.SurveyCreateResp{ID: newid}, nil
