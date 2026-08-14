@@ -8,6 +8,7 @@ import (
 	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // fakeStore 只实现被测路径需要的方法;其余返回零值。
@@ -64,7 +65,7 @@ func ctxUser(uid string) context.Context {
 
 // ctxRole 造带指定用户 id + 角色的 ctx(RBAC 判定用)。
 func ctxRole(uid, role string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid, Role: role})
+	return metadata.With(context.Background(), metadata.Metadata{UserID: uid, Role: role})
 }
 
 // codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。

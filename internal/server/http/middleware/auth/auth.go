@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"wenjuandiaocha_backend/api"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 	"wenjuandiaocha_backend/internal/server/http/render"
 	svcauth "wenjuandiaocha_backend/internal/service/auth"
 )
@@ -26,9 +26,9 @@ func RequireAuth(svc svcauth.Service) gin.HandlerFunc {
 			return
 		}
 		// 先把 token 补进 ctx metadata 供 ValidateSession 读(保留 ip/ua)。
-		md := api.MetadataFrom(c.Request.Context())
+		md := metadata.From(c.Request.Context())
 		md.Token = token
-		ctx := api.WithMetadata(c.Request.Context(), md)
+		ctx := metadata.With(c.Request.Context(), md)
 		resp, verr := svc.ValidateSession(ctx)
 		if verr != nil {
 			render.JSON(c, nil, verr)
@@ -37,7 +37,7 @@ func RequireAuth(svc svcauth.Service) gin.HandlerFunc {
 		// 校验通过:补 userID + role(RBAC 能力判定用),替换 request ctx 供下游 handler。
 		md.UserID = resp.UserID
 		md.Role = resp.Role
-		c.Request = c.Request.WithContext(api.WithMetadata(ctx, md))
+		c.Request = c.Request.WithContext(metadata.With(ctx, md))
 		c.Next()
 	}
 }

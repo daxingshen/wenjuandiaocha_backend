@@ -15,6 +15,7 @@ import (
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/id"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 	"wenjuandiaocha_backend/internal/rbac"
 )
 
@@ -29,7 +30,7 @@ type Store interface {
 // I/O 契约集中在 api 包(一处定义,http/gRPC 两端共用)。
 
 // Service 是匿名作答提交业务契约。*Manager 实现它;传输层持本接口。
-// Submit 的防刷 meta(ip/ua)来自 ctx 的 api.Metadata,不进 Req。
+// Submit 的防刷 meta(ip/ua)来自 ctx 的 metadata.Metadata,不进 Req。
 type Service interface {
 	GetPublished(ctx context.Context, req api.GetPublishedReq) (api.GetPublishedResp, error)
 	Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error)
@@ -76,7 +77,7 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error) {
 	// 登录态由后端从 ctx 会话身份确认,不采信调用方声明:UserID 仅由 requireAuth 校验
 	// session 后注入(匿名 /public 路由无此中间件,UserID 恒空),故 UserID != "" ⟺ 已登录。
-	md := api.MetadataFrom(ctx)
+	md := metadata.From(ctx)
 	authenticated := md.UserID != ""
 
 	// 已登录路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。

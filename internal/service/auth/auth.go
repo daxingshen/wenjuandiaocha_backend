@@ -9,9 +9,10 @@ import (
 	"github.com/google/wire"
 
 	"wenjuandiaocha_backend/api"
-	authlib "wenjuandiaocha_backend/internal/auth"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
+	authlib "wenjuandiaocha_backend/internal/lib/auth"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // Store 是本层依赖的 dao 子集(消费方定义接口,便于单测)。*dao.Store 实现它。
@@ -26,7 +27,7 @@ type Store interface {
 // I/O 契约集中在 api 包(一处定义,http/gRPC 两端共用)。
 
 // Service 是鉴权业务契约。*Manager 实现它;传输层持本接口。
-// Me 的 userID、Logout/ValidateSession 的 token 来自 ctx 的 api.Metadata,不进 Req。
+// Me 的 userID、Logout/ValidateSession 的 token 来自 ctx 的 metadata.Metadata,不进 Req。
 type Service interface {
 	Login(ctx context.Context, req api.AuthLoginReq) (api.AuthLoginResp, error)
 	Me(ctx context.Context) (api.AuthMeResp, error)
@@ -73,7 +74,7 @@ func (m *Manager) Login(ctx context.Context, req api.AuthLoginReq) (api.AuthLogi
 
 // Logout 删会话(token 从 ctx metadata 取;为空则无操作)。
 func (m *Manager) Logout(ctx context.Context) error {
-	if token := api.MetadataFrom(ctx).Token; token != "" {
+	if token := metadata.From(ctx).Token; token != "" {
 		_ = m.store.DeleteSession(ctx, token)
 	}
 	return nil
@@ -81,7 +82,7 @@ func (m *Manager) Logout(ctx context.Context) error {
 
 // Me 取当前用户信息。userID 从 ctx metadata 取。
 func (m *Manager) Me(ctx context.Context) (api.AuthMeResp, error) {
-	u, err := m.store.GetUserByID(ctx, api.MetadataFrom(ctx).UserID)
+	u, err := m.store.GetUserByID(ctx, metadata.From(ctx).UserID)
 	if err != nil {
 		return api.AuthMeResp{}, err
 	}
@@ -91,7 +92,7 @@ func (m *Manager) Me(ctx context.Context) (api.AuthMeResp, error) {
 // ValidateSession 校验会话 token:查无/无效 → Unauthorized("会话无效");
 // 已过期 → 删除并 Unauthorized("会话已过期");有效返回 userID。空 token 由传输层先行拦截。
 func (m *Manager) ValidateSession(ctx context.Context) (api.AuthValidateSessionResp, error) {
-	token := api.MetadataFrom(ctx).Token
+	token := metadata.From(ctx).Token
 	uid, role, expires, err := m.store.GetSession(ctx, token)
 	if err != nil {
 		return api.AuthValidateSessionResp{}, ecode.Unauthorized("会话无效")

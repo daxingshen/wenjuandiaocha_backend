@@ -15,7 +15,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"time"
 )
@@ -33,30 +32,7 @@ type ValidationError struct {
 	Message string `json:"message"`
 }
 
-// ---------- 传输派生元数据(不属于客户端业务入参,走 ctx 流转)----------
-
-// Metadata 承载传输层派生的调用上下文:会话身份、会话 token、客户端网络信息。
-// 由各传输层(http 从 session/cookie/请求、gRPC 从拦截器/metadata)填入 ctx,service 从 ctx 读。
-type Metadata struct {
-	UserID    string // 已认证用户 id(studio 端点归属校验用)
-	Role      string // 已认证用户角色 admin|creator|respondent(RBAC 能力判定用;RequireAuth 注入)
-	Token     string // 会话 token(logout/validateSession 用)
-	ClientIP  string // 客户端 IP(防刷 meta)
-	UserAgent string // 客户端 UA(防刷 meta)
-}
-
-type metadataKey struct{}
-
-// WithMetadata 把 Metadata 挂到 ctx。传输层在调 service 前调用。
-func WithMetadata(ctx context.Context, md Metadata) context.Context {
-	return context.WithValue(ctx, metadataKey{}, md)
-}
-
-// MetadataFrom 从 ctx 取 Metadata;未设置返回零值。service 层调用。
-func MetadataFrom(ctx context.Context) Metadata {
-	md, _ := ctx.Value(metadataKey{}).(Metadata)
-	return md
-}
+// 传输派生元数据(会话身份/token/ip/ua)已抽到 internal/lib/metadata 包,经 ctx 流转,不进业务 Req。
 
 // ---------- auth 域 ----------
 

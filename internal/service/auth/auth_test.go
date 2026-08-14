@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"wenjuandiaocha_backend/api"
-	authlib "wenjuandiaocha_backend/internal/auth"
+	authlib "wenjuandiaocha_backend/internal/lib/auth"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 type fakeStore struct {
@@ -108,7 +109,7 @@ func TestLogin_Success_CreatesSession(t *testing.T) {
 func TestValidateSession_Expired_DeletesAndUnauthorized(t *testing.T) {
 	f := &fakeStore{sessUserID: "u1", sessExpires: time.Now().Add(-time.Minute)}
 	m := New(f, time.Hour)
-	_, err := m.ValidateSession(api.WithMetadata(context.Background(), api.Metadata{Token: "tok"}))
+	_, err := m.ValidateSession(metadata.With(context.Background(), metadata.Metadata{Token: "tok"}))
 	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
 		t.Fatalf("过期会话 code = %d, want CodeUnauthorized", got)
 	}
@@ -121,7 +122,7 @@ func TestValidateSession_Expired_DeletesAndUnauthorized(t *testing.T) {
 func TestValidateSession_NotFound_Unauthorized(t *testing.T) {
 	f := &fakeStore{sessErr: dao.ErrNotFound}
 	m := New(f, time.Hour)
-	_, err := m.ValidateSession(api.WithMetadata(context.Background(), api.Metadata{Token: "tok"}))
+	_, err := m.ValidateSession(metadata.With(context.Background(), metadata.Metadata{Token: "tok"}))
 	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
 		t.Fatalf("无效会话 code = %d, want CodeUnauthorized", got)
 	}
@@ -131,7 +132,7 @@ func TestValidateSession_NotFound_Unauthorized(t *testing.T) {
 func TestValidateSession_Valid_ReturnsUIDAndRole(t *testing.T) {
 	f := &fakeStore{sessUserID: "u1", sessRole: "admin", sessExpires: time.Now().Add(time.Hour)}
 	m := New(f, time.Hour)
-	resp, err := m.ValidateSession(api.WithMetadata(context.Background(), api.Metadata{Token: "tok"}))
+	resp, err := m.ValidateSession(metadata.With(context.Background(), metadata.Metadata{Token: "tok"}))
 	if err != nil || resp.UserID != "u1" || resp.Role != "admin" {
 		t.Fatalf("有效会话应返回 u1/admin,得到 uid=%q role=%q err=%v", resp.UserID, resp.Role, err)
 	}
@@ -146,7 +147,7 @@ func TestLoginAndMe_PropagateRole(t *testing.T) {
 	if err != nil || login.User.Role != "creator" {
 		t.Fatalf("Login 应透出 role=creator,得到 %q err=%v", login.User.Role, err)
 	}
-	me, err := m.Me(api.WithMetadata(context.Background(), api.Metadata{UserID: "u1"}))
+	me, err := m.Me(metadata.With(context.Background(), metadata.Metadata{UserID: "u1"}))
 	if err != nil || me.User.Role != "creator" {
 		t.Fatalf("Me 应透出 role=creator,得到 %q err=%v", me.User.Role, err)
 	}

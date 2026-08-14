@@ -8,6 +8,7 @@ import (
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // fakeStore 记录调用,按字段返回预设结果。
@@ -119,7 +120,7 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 // ctxRole 造一个「已登录」ctx:带真实会话身份(UserID)+ 角色。
 // UserID 非空 = submission 据此判定为已登录路径(等价 requireAuth 注入后的 ctx)。
 func ctxRole(role string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{UserID: "u_" + role, Role: role})
+	return metadata.With(context.Background(), metadata.Metadata{UserID: "u_" + role, Role: role})
 }
 
 // 作答模式闸门:login_required 问卷经匿名路径提交(无会话)→ 401 需登录。

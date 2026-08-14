@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"wenjuandiaocha_backend/api"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 	authmw "wenjuandiaocha_backend/internal/server/http/middleware/auth"
 	"wenjuandiaocha_backend/internal/server/http/render"
 )
@@ -31,9 +32,9 @@ func (s *Server) login(c *gin.Context) {
 func (s *Server) logout(c *gin.Context) {
 	// logout 无 requireAuth 中间件,token 在此从 cookie 取并补进 ctx metadata(保留全局 ip/ua)。
 	if token, err := c.Cookie(authmw.SessionCookie); err == nil && token != "" {
-		md := api.MetadataFrom(c.Request.Context())
+		md := metadata.From(c.Request.Context())
 		md.Token = token
-		_ = s.auth.Logout(api.WithMetadata(c.Request.Context(), md))
+		_ = s.auth.Logout(metadata.With(c.Request.Context(), md))
 	}
 	s.clearSessionCookie(c)
 	render.JSON(c, nil, nil)

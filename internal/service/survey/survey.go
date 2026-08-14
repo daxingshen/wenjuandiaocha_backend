@@ -15,6 +15,7 @@ import (
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/id"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 	"wenjuandiaocha_backend/internal/rbac"
 )
 
@@ -35,7 +36,7 @@ type Store interface {
 // Method(ctx, api.SurveyXReq) (api.SurveyXResp, error);OwnerID 由传输层填入 Req。
 
 // Service 是问卷 studio 业务契约。*Manager 实现它;传输层持本接口。
-// ownerID 来自 ctx 的 api.Metadata(传输层注入),不进 Req。
+// ownerID 来自 ctx 的 metadata.Metadata(传输层注入),不进 Req。
 type Service interface {
 	List(ctx context.Context) (api.SurveyListResp, error)
 	Create(ctx context.Context, req api.SurveyCreateReq) (api.SurveyCreateResp, error)
@@ -64,7 +65,7 @@ var ProviderSet = wire.NewSet(New, wire.Bind(new(Service), new(*Manager)))
 
 // roleOf 从 ctx metadata 取当前用户角色(RequireAuth 注入)。
 func roleOf(ctx context.Context) rbac.Role {
-	return rbac.Role(api.MetadataFrom(ctx).Role)
+	return rbac.Role(metadata.From(ctx).Role)
 }
 
 // authorize 是第一层平台能力位:role 不能做该类动作 → 真 403(平台能力级越权)。
@@ -91,7 +92,7 @@ func (m *Manager) owned(ctx context.Context, id string) (dao.SurveyMeta, error) 
 	if rbac.IsAdmin(roleOf(ctx)) {
 		return meta, nil // admin 短路归属
 	}
-	if meta.OwnerID != api.MetadataFrom(ctx).UserID {
+	if meta.OwnerID != metadata.From(ctx).UserID {
 		return dao.SurveyMeta{}, ecode.Forbidden()
 	}
 	return meta, nil
@@ -108,7 +109,7 @@ func (m *Manager) List(ctx context.Context) (api.SurveyListResp, error) {
 	if rbac.IsAdmin(roleOf(ctx)) {
 		rows, err = m.store.ListAllSurveys(ctx) // admin 全站视角
 	} else {
-		rows, err = m.store.ListSurveysByOwner(ctx, api.MetadataFrom(ctx).UserID) // creator 仅本人
+		rows, err = m.store.ListSurveysByOwner(ctx, metadata.From(ctx).UserID) // creator 仅本人
 	}
 	if err != nil {
 		return api.SurveyListResp{}, err
@@ -129,7 +130,7 @@ func (m *Manager) Create(ctx context.Context, req api.SurveyCreateReq) (api.Surv
 	if err := authorize(ctx, rbac.ActionSurveyCreate); err != nil {
 		return api.SurveyCreateResp{}, err
 	}
-	ownerID := api.MetadataFrom(ctx).UserID
+	ownerID := metadata.From(ctx).UserID
 	newid := id.New()
 	var schema domain.SurveySchema
 	if len(req.Body) > 0 {
