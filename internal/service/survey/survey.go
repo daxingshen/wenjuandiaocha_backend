@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -102,10 +103,16 @@ const (
 // List 问卷列表:admin 全站,creator 仅本人,respondent 无权(第一层能力位挡下)。
 // offset 分页(ORDER BY created_at DESC, id DESC);keyword/status/type 透传两条分支。
 // 搜索态(Q 非空):锁 page=1、limit=10、只返回前 10 条(搜索不翻页,前端隐藏页码器)。
-// 返回 Total 为筛选后总行数(COUNT(*) OVER()),供前端算总页数。ownerID/role 从 ctx metadata 取。
+// 返回 Total 为筛选后总行数(独立 COUNT 查询),供前端算总页数。ownerID/role 从 ctx metadata 取。
 func (m *Manager) List(ctx context.Context, req api.SurveyListReq) (api.SurveyListResp, error) {
 	keyword := trimToPtr(req.Q)
 	searching := keyword != nil
+	if keyword != nil {
+		// 转义 LIKE 元字符:SQL 侧走 ILIKE ... ESCAPE '\',否则用户输入的 % _ 会被当通配符,
+		// 搜 "50%" 变成前缀匹配、"a_b" 匹配 "axb"。先转义 \ 自身,再转义 % 和 _。
+		esc := escapeLike(*keyword)
+		keyword = &esc
+	}
 
 	p := dao.SurveyListParams{
 		Keyword: keyword,
@@ -128,8 +135,14 @@ func (m *Manager) List(ctx context.Context, req api.SurveyListReq) (api.SurveyLi
 		if page < 1 {
 			page = 1
 		}
+		// int64 计算 + clamp 到 int32 上限:page 用户可控且只做了下限钳制,
+		// 直接 int32((page-1)*size) 会在大 page 下回绕成负 OFFSET(Postgres 报错 / 返回错误页)。
+		offset := int64(page-1) * int64(size)
+		if offset > math.MaxInt32 {
+			offset = math.MaxInt32
+		}
 		p.Limit = int32(size)
-		p.Offset = int32((page - 1) * size)
+		p.Offset = int32(offset)
 	}
 
 	var rows []dao.SurveyListItem
@@ -161,6 +174,13 @@ func trimToPtr(s string) *string {
 		return nil
 	}
 	return &t
+}
+
+// escapeLike 转义 SQL LIKE/ILIKE 元字符(与查询侧 ESCAPE '\' 配套)。
+// 必须先转义反斜杠自身,否则会把随后为 % _ 补的转义反斜杠再转义一遍。
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 // Create 首存落库:后端强制分配 id(忽略客户端传的 id,防越权/串号)、补 schema 默认值。

@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAllSurveys = `-- name: CountAllSurveys :one
+SELECT COUNT(*) FROM surveys
+WHERE ($1::text IS NULL OR title ILIKE '%' || $1 || '%' ESCAPE '\')
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR type = $3)
+`
+
+type CountAllSurveysParams struct {
+	Keyword *string
+	Status  *string
+	Type    *string
+}
+
+// ListAllSurveys 的筛选后总行数(WHERE 必须与 List 逐字一致)。
+func (q *Queries) CountAllSurveys(ctx context.Context, arg CountAllSurveysParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllSurveys, arg.Keyword, arg.Status, arg.Type)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSurveysByOwner = `-- name: CountSurveysByOwner :one
+SELECT COUNT(*) FROM surveys
+WHERE owner_id = $1
+  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%' ESCAPE '\')
+  AND ($3::text IS NULL OR status = $3)
+  AND ($4::text IS NULL OR type = $4)
+`
+
+type CountSurveysByOwnerParams struct {
+	OwnerID string
+	Keyword *string
+	Status  *string
+	Type    *string
+}
+
+// ListSurveysByOwner 的筛选后总行数(WHERE 必须与 List 逐字一致,否则计数与页内不匹配)。
+func (q *Queries) CountSurveysByOwner(ctx context.Context, arg CountSurveysByOwnerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSurveysByOwner,
+		arg.OwnerID,
+		arg.Keyword,
+		arg.Status,
+		arg.Type,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSurvey = `-- name: CreateSurvey :exec
 INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access)
 VALUES ($1, $2, $3, $4, 'draft', $5, $6)
@@ -126,9 +175,9 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) er
 }
 
 const listAllSurveys = `-- name: ListAllSurveys :many
-SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
+SELECT survey_id, title, type, status, updated_at
 FROM surveys
-WHERE ($1::text IS NULL OR title ILIKE '%' || $1 || '%')
+WHERE ($1::text IS NULL OR title ILIKE '%' || $1 || '%' ESCAPE '\')
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR type = $3)
 ORDER BY created_at DESC, id DESC
@@ -149,11 +198,10 @@ type ListAllSurveysRow struct {
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
-	Total     int64
 }
 
 // admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
-// 过滤/分页语义同 ListSurveysByOwner。
+// 过滤/分页语义同 ListSurveysByOwner;总行数由 CountAllSurveys 单独取。
 func (q *Queries) ListAllSurveys(ctx context.Context, arg ListAllSurveysParams) ([]ListAllSurveysRow, error) {
 	rows, err := q.db.Query(ctx, listAllSurveys,
 		arg.Keyword,
@@ -175,7 +223,6 @@ func (q *Queries) ListAllSurveys(ctx context.Context, arg ListAllSurveysParams) 
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
-			&i.Total,
 		); err != nil {
 			return nil, err
 		}
@@ -188,10 +235,10 @@ func (q *Queries) ListAllSurveys(ctx context.Context, arg ListAllSurveysParams) 
 }
 
 const listSurveysByOwner = `-- name: ListSurveysByOwner :many
-SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
+SELECT survey_id, title, type, status, updated_at
 FROM surveys
 WHERE owner_id = $1
-  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%')
+  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%' ESCAPE '\')
   AND ($3::text IS NULL OR status = $3)
   AND ($4::text IS NULL OR type = $4)
 ORDER BY created_at DESC, id DESC
@@ -213,12 +260,12 @@ type ListSurveysByOwnerRow struct {
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
-	Total     int64
 }
 
 // creator 本人列表。offset 分页:ORDER BY created_at DESC, id DESC(id=代理键,单调,兜底稳定序)。
 // 投影业务键 survey_id(对外身份);过滤参数为空(nil)时短路不生效。
-// COUNT(*) OVER() 返回筛选后总行数(LIMIT 前计数),供前端算总页数。
+// 总行数由 CountSurveysByOwner 单独取(不用 COUNT(*) OVER():越界页返回空集会丢计数报 0)。
+// keyword 走 ILIKE + ESCAPE '\':调用方须先转义 % _ \(否则用户输入的通配符会改变匹配语义)。
 func (q *Queries) ListSurveysByOwner(ctx context.Context, arg ListSurveysByOwnerParams) ([]ListSurveysByOwnerRow, error) {
 	rows, err := q.db.Query(ctx, listSurveysByOwner,
 		arg.OwnerID,
@@ -241,7 +288,6 @@ func (q *Queries) ListSurveysByOwner(ctx context.Context, arg ListSurveysByOwner
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
-			&i.Total,
 		); err != nil {
 			return nil, err
 		}

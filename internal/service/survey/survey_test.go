@@ -3,6 +3,7 @@ package survey
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"wenjuandiaocha_backend/api"
@@ -374,9 +375,38 @@ func TestList_PageOffset(t *testing.T) {
 	if fc2.listParams.Offset != 0 {
 		t.Fatalf("page<1 应落第一页 offset=0,得到 %d", fc2.listParams.Offset)
 	}
+
+	// 超大 page:(page-1)*size 用 int64 算再 clamp 到 int32 上限,绝不回绕成负 offset。
+	// page=1e8、size=100 → 乘积 ~1e10 远超 int32,直接 int32 转换会回绕成负数。
+	fc3 := &fakeStore{}
+	_, _ = New(fc3).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 100, Page: 100000000})
+	if fc3.listParams.Offset < 0 {
+		t.Fatalf("超大 page 的 offset 不得为负(int32 回绕),得到 %d", fc3.listParams.Offset)
+	}
+	if fc3.listParams.Offset != math.MaxInt32 {
+		t.Fatalf("超大 page 的 offset 应 clamp 到 %d,得到 %d", int32(math.MaxInt32), fc3.listParams.Offset)
+	}
 }
 
-// List total 透传:store 返回的 COUNT(*) OVER() 总数原样出现在响应,供前端算总页数。
+// List keyword 转义:含 LIKE 元字符的搜索词进 store 前应被转义(配合 SQL 侧 ESCAPE '\'),
+// 否则用户输入的 % _ 会被当通配符,污染匹配语义。
+func TestList_KeywordEscapesLikeMetachars(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"50%", `50\%`},
+		{"a_b", `a\_b`},
+		{`x\y`, `x\\y`},
+		{"满意度", "满意度"}, // 无元字符原样透传
+	}
+	for _, c := range cases {
+		fc := &fakeStore{}
+		_, _ = New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Q: c.in})
+		if fc.listKeyword == nil || *fc.listKeyword != c.want {
+			t.Fatalf("keyword %q 应转义为 %q,得到 %v", c.in, c.want, fc.listKeyword)
+		}
+	}
+}
+
+// List total 透传:store 返回的总数(独立 COUNT 查询)原样出现在响应,供前端算总页数。
 func TestList_TotalPassthrough(t *testing.T) {
 	fc := &fakeStore{ownerItems: makeItems(2), listTotal: 57}
 	resp, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 2, Page: 1})

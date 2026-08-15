@@ -112,7 +112,8 @@ type SurveyListParams struct {
 	Offset  int32
 }
 
-// 两个 List 方法返回 (页内项, 筛选后总行数, error)。total 来自 COUNT(*) OVER()(首行取,空集为 0)。
+// 两个 List 方法返回 (页内项, 筛选后总行数, error)。total 由独立 COUNT 查询取——
+// 不用 COUNT(*) OVER():窗口计数搭在返回行上,越界页(OFFSET 越过全部行)返回空集会丢计数报 0。
 func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string, p SurveyListParams) ([]SurveyListItem, int64, error) {
 	rows, err := s.q.ListSurveysByOwner(ctx, gen.ListSurveysByOwnerParams{
 		OwnerID: ownerID,
@@ -125,15 +126,18 @@ func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string, p Survey
 	if err != nil {
 		return nil, 0, err
 	}
-	out := make([]SurveyListItem, 0, len(rows))
-	var total int64
-	for _, r := range rows {
-		total = r.Total
-		out = append(out, SurveyListItem{
-			SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
-		})
+	total, err := s.q.CountSurveysByOwner(ctx, gen.CountSurveysByOwnerParams{
+		OwnerID: ownerID,
+		Keyword: p.Keyword,
+		Status:  p.Status,
+		Type:    p.Type,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-	return out, total, nil
+	return mapSurveyRows(rows, func(r gen.ListSurveysByOwnerRow) SurveyListItem {
+		return SurveyListItem{SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time}
+	}), total, nil
 }
 
 // ListAllSurveys 列出全站问卷(admin 全站视角,不限 owner)。过滤/分页语义同 ByOwner。
@@ -148,15 +152,27 @@ func (s *Store) ListAllSurveys(ctx context.Context, p SurveyListParams) ([]Surve
 	if err != nil {
 		return nil, 0, err
 	}
-	out := make([]SurveyListItem, 0, len(rows))
-	var total int64
-	for _, r := range rows {
-		total = r.Total
-		out = append(out, SurveyListItem{
-			SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
-		})
+	total, err := s.q.CountAllSurveys(ctx, gen.CountAllSurveysParams{
+		Keyword: p.Keyword,
+		Status:  p.Status,
+		Type:    p.Type,
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-	return out, total, nil
+	return mapSurveyRows(rows, func(r gen.ListAllSurveysRow) SurveyListItem {
+		return SurveyListItem{SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time}
+	}), total, nil
+}
+
+// mapSurveyRows 把生成行按 conv 投影成对外 SurveyListItem,消除两个 List 方法里重复的 make+循环样板。
+// 两个 gen 行类型(ByOwner/All)字段同构但类型不同,故投影表达式由各调用方给出。
+func mapSurveyRows[T any](rows []T, conv func(T) SurveyListItem) []SurveyListItem {
+	out := make([]SurveyListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, conv(r))
+	}
+	return out
 }
 
 func (s *Store) UpdateDraft(ctx context.Context, surveyID, title, typ string, draftSchema []byte) error {
