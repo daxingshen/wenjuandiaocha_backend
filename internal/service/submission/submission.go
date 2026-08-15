@@ -16,7 +16,6 @@ import (
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/id"
 	"wenjuandiaocha_backend/internal/lib/metadata"
-	"wenjuandiaocha_backend/internal/rbac"
 )
 
 // Store 是本层依赖的 dao 子集(消费方定义接口,便于单测)。*dao.Store 实现它。
@@ -80,11 +79,9 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 	md := metadata.From(ctx)
 	authenticated := md.UserID != ""
 
-	// 已登录路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。
-	// 匿名路径无账号、不查能力位,走 anonymous 问卷分支。
-	if authenticated && !rbac.Can(rbac.Role(md.Role), rbac.ActionSubmitAnswer) {
-		return api.SubmitResp{}, ecode.Forbidden403("当前账号无作答权限")
-	}
+	// 第一层能力位(answer:submit —— respondent/admin 可、creator 拒)已上移到 HTTP 传输层
+	// RequireAuth(svc, ActionSubmitAnswer) 中间件;匿名 /public 路径无中间件,authenticated=false,
+	// 走下面 anonymous 分支不受影响。本层只管数据相关闸门:状态 live + 作答模式匹配。
 
 	// 收答前置:问卷必须存在且 status=live(close 后停收)。
 	survey, err := m.store.GetSurvey(ctx, req.SurveyID)

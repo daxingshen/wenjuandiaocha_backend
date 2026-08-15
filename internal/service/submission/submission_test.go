@@ -147,18 +147,8 @@ func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
-// 能力位:creator 经鉴权路径提交 login_required 问卷 → 403(creator 不能作答)。
-func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
-	m := New(f)
-	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
-	if got := codeOf(t, err); got != ecode.CodeForbidden {
-		t.Fatalf("creator 鉴权作答 code = %d, want CodeForbidden(403)", got)
-	}
-	if f.saveCalled {
-		t.Fatal("能力位拦下不应落库")
-	}
-}
+// 注:第一层能力位(creator 经鉴权路径作答 → 403)已上移到 RequireAuth(ActionSubmitAnswer) 中间件,
+// 其回归测试在 internal/server/http/middleware/auth 端点级(能力位真正生效的位置);此处只测数据相关闸门。
 
 // respondent 经鉴权路径提交 login_required 问卷 → 成功落库。
 func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
