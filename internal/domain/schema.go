@@ -21,10 +21,13 @@ const (
 
 // Question 一道题。核心不认识具体题型,题型细节全在 Props(约束 2)。
 type Question struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Title    string          `json:"title"`
-	Required bool            `json:"required,omitempty"`
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Title string `json:"title"`
+	// Hint 填写提示:题干下方说明文字,作答者可见(通用字段,所有题型共用)。
+	// 纯展示,不参与 validate/normalize;须与前端 Question.hint 对齐,否则 wire 传来的 hint 被静默丢弃。
+	Hint     string `json:"hint,omitempty"`
+	Required bool   `json:"required,omitempty"`
 	// Props 题型专属配置,核心层不解释其结构;各题型 handler 按需解析。
 	Props json.RawMessage `json:"props"`
 }

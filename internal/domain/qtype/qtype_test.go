@@ -244,3 +244,133 @@ func TestMatrixSingle(t *testing.T) {
 		t.Errorf("矩阵行 value 不符,得 %+v", rows)
 	}
 }
+
+func TestMatrixMulti(t *testing.T) {
+	props := map[string]any{
+		"rows":    []map[string]string{{"id": "r1", "label": "行1"}, {"id": "r2", "label": "行2"}},
+		"options": []map[string]string{{"value": "a", "label": "A"}, {"value": "b", "label": "B"}, {"value": "c", "label": "C"}},
+		"min":     1,
+		"max":     2,
+	}
+	q := mkQ("q1", "matrix-multi", false, props)
+	h := handler(t, "matrix-multi")
+
+	// 合法(非必答,空行跳过)
+	if msg := h.Validate(q, map[string]any{"r1": []any{"a", "b"}}); msg != "" {
+		t.Errorf("合法多选应通过,得 %q", msg)
+	}
+	// 超每行 max
+	if msg := h.Validate(q, map[string]any{"r1": []any{"a", "b", "c"}}); msg != "每行最多选择 2 项" {
+		t.Errorf("超每行 max 应报错,得 %q", msg)
+	}
+	// 重复
+	if msg := h.Validate(q, map[string]any{"r1": []any{"a", "a"}}); msg != "选项不可重复" {
+		t.Errorf("重复应报错,得 %q", msg)
+	}
+	// 非法列
+	if msg := h.Validate(q, map[string]any{"r1": []any{"z"}}); msg != "包含不存在的选项" {
+		t.Errorf("非法列应报错,得 %q", msg)
+	}
+	// 非数组行值
+	if msg := h.Validate(q, map[string]any{"r1": "a"}); msg != "答案格式应为选项数组" {
+		t.Errorf("非数组行值应报错,得 %q", msg)
+	}
+	// 必答:缺行
+	qReq := mkQ("q1", "matrix-multi", true, props)
+	if msg := h.Validate(qReq, map[string]any{"r1": []any{"a"}}); msg != "每个子项都需作答" {
+		t.Errorf("必答缺行应报错,得 %q", msg)
+	}
+	// normalize:每行每项一行
+	rows := h.Normalize(q, map[string]any{"r1": []any{"a", "b"}, "r2": []any{"c"}})
+	if len(rows) != 3 || rows[0].SubID != "r1" || rows[2].SubID != "r2" || rows[2].Value != "c" {
+		t.Errorf("矩阵多选 normalize 不符,得 %+v", rows)
+	}
+}
+
+func TestMatrixScale(t *testing.T) {
+	q := mkQ("q1", "matrix-scale", true, map[string]any{
+		"rows": []map[string]any{{"id": "r1", "label": "行1"}, {"id": "r2", "label": "行2"}},
+		"options": []map[string]any{
+			{"value": "s1", "label": "差", "score": 1},
+			{"value": "s5", "label": "好", "score": 5},
+		},
+		"level": 5,
+	})
+	h := handler(t, "matrix-scale")
+
+	if msg := h.Validate(q, map[string]any{"r1": "s1", "r2": "s5"}); msg != "" {
+		t.Errorf("合法量表应通过,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"r1": "s9", "r2": "s5"}); msg != "所选选项不存在" {
+		t.Errorf("非法量级应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"r1": "s1"}); msg != "每个子项都需作答" {
+		t.Errorf("必答缺行应报错,得 %q", msg)
+	}
+	// normalize 产出分值(float64),不是列 value 字符串。
+	rows := h.Normalize(q, map[string]any{"r1": "s1", "r2": "s5"})
+	if len(rows) != 2 || rows[0].Value != 1.0 || rows[1].Value != 5.0 {
+		t.Errorf("量表 normalize 应产分值 1,5,得 %+v", rows)
+	}
+}
+
+func TestMatrixFill(t *testing.T) {
+	props := map[string]any{
+		"rows":      []map[string]string{{"id": "r1", "label": "手机"}, {"id": "r2", "label": "邮箱"}},
+		"maxLength": 5,
+	}
+	q := mkQ("q1", "matrix-fill", false, props)
+	h := handler(t, "matrix-fill")
+
+	if msg := h.Validate(q, map[string]any{"r1": "abc"}); msg != "" {
+		t.Errorf("合法填空应通过,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"r1": "abcdef"}); msg != "每行不超过 5 个字符" {
+		t.Errorf("超长应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"rX": "a"}); msg != "存在不属于本题的子项" {
+		t.Errorf("非法子行应报错,得 %q", msg)
+	}
+	qReq := mkQ("q1", "matrix-fill", true, props)
+	if msg := h.Validate(qReq, map[string]any{"r1": "abc"}); msg != "每个子项都需作答" {
+		t.Errorf("必答缺行应报错,得 %q", msg)
+	}
+	rows := h.Normalize(q, map[string]any{"r1": "abc", "r2": ""})
+	if len(rows) != 1 || rows[0].SubID != "r1" || rows[0].Value != "abc" {
+		t.Errorf("填空 normalize 不符,得 %+v", rows)
+	}
+}
+
+func TestMatrixSlider(t *testing.T) {
+	props := map[string]any{
+		"rows": []map[string]string{{"id": "r1", "label": "价格"}, {"id": "r2", "label": "质量"}},
+		"min":  0,
+		"max":  100,
+		"step": 5,
+	}
+	q := mkQ("q1", "matrix-slider", false, props)
+	h := handler(t, "matrix-slider")
+
+	// JSON 数字 → float64
+	if msg := h.Validate(q, map[string]any{"r1": 60.0}); msg != "" {
+		t.Errorf("合法滑动应通过,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"r1": 200.0}); msg != "数值应在 0 到 100 之间" {
+		t.Errorf("越界应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"r1": "x"}); msg != "答案应为数值" {
+		t.Errorf("非数值应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"rX": 10.0}); msg != "存在不属于本题的子项" {
+		t.Errorf("非法子行应报错,得 %q", msg)
+	}
+	// 必答:未拖动的行(无键)
+	qReq := mkQ("q1", "matrix-slider", true, props)
+	if msg := h.Validate(qReq, map[string]any{"r1": 60.0}); msg != "每个子项都需作答" {
+		t.Errorf("必答缺行应报错,得 %q", msg)
+	}
+	rows := h.Normalize(q, map[string]any{"r1": 60.0, "r2": 80.0})
+	if len(rows) != 2 || rows[0].Value != 60.0 || rows[1].Value != 80.0 {
+		t.Errorf("滑动 normalize 不符,得 %+v", rows)
+	}
+}
