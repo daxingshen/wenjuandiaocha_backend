@@ -76,9 +76,9 @@ func (s *Server) Router() *gin.Engine {
 		sv.POST("/:id/close", reqAuth(rbac.ActionSurveyClose), s.closeSurvey)              //
 		sv.POST("/:id/reopen", reqAuth(rbac.ActionSurveyReopen), s.reopenSurvey)           //
 		sv.GET("/:id/stats", reqAuth(rbac.ActionSurveyStats), s.surveyStats)               //
-		// 需登录作答(login_required 问卷):action="" 只鉴权;作答能力位与问卷模式(anonymous/
-		// login_required)+ 匿名/登录路径耦合,需查问卷,由 submission service 判(非纯能力位)。
-		sv.POST("/:id/answers", reqAuth(""), s.submitAnswersAuthed)
+		// 需登录作答(login_required 问卷):第一层能力位 answer:submit 在中间件判(creator 被拒 403);
+		// 作答模式匹配(问卷是不是 login_required)+ 状态 live 等数据相关闸门需查问卷,留 submission service。
+		sv.POST("/:id/answers", reqAuth(rbac.ActionSubmitAnswer), s.submitAnswersAuthed)
 	}
 
 	return r

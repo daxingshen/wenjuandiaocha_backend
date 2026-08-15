@@ -70,6 +70,25 @@ func TestRequireAuth_Respondent_CreatorAction_Forbidden403(t *testing.T) {
 	}
 }
 
+// creator 调作答能力位(answer:submit)→ 403:creator 是创作身份,不能作答(能力位在中间件拦,不进 handler)。
+func TestRequireAuth_Creator_SubmitAction_Forbidden403(t *testing.T) {
+	w := runReq("creator", rbac.ActionSubmitAnswer)
+	if w.Code != http.StatusOK { // 统一信封恒 200 HTTP
+		t.Fatalf("HTTP=%d, want 200 (业务错走信封)", w.Code)
+	}
+	if got := bizCode(t, w); got != ecode.CodeForbidden {
+		t.Fatalf("creator answer:submit biz code=%d, want CodeForbidden(403)", got)
+	}
+}
+
+// respondent 调作答能力位(answer:submit)→ 通过(唯一能力):作答模式/状态闸门另在 service 判。
+func TestRequireAuth_Respondent_SubmitAction_Passes(t *testing.T) {
+	w := runReq("respondent", rbac.ActionSubmitAnswer)
+	if w.Code != http.StatusOK || w.Body.String() != `{"ok":true}` {
+		t.Fatalf("respondent answer:submit 应通过: HTTP=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 // creator 调创作端能力位 → 通过(进 handler),能力位不拦(归属另在 service 判)。
 func TestRequireAuth_Creator_CreatorAction_Passes(t *testing.T) {
 	w := runReq("creator", rbac.ActionSurveyUpdate)
