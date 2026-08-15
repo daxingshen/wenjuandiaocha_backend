@@ -17,10 +17,12 @@ type AnswerRow struct {
 	SubID         *string
 	ValueText     *string
 	ValueNum      *float64
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Response struct {
-	ID            string
+	ID            int64
+	ResponseID    string
 	SurveyID      string
 	SurveyVersion int32
 	Raw           []byte
@@ -36,7 +38,8 @@ type Session struct {
 }
 
 type Survey struct {
-	ID               string
+	ID               int64
+	SurveyID         string
 	OwnerID          string
 	Type             string
 	Title            string
@@ -49,14 +52,16 @@ type Survey struct {
 }
 
 type SurveyVersion struct {
-	SurveyID    string
-	Version     int32
-	Schema      []byte
-	PublishedAt pgtype.Timestamptz
+	ID        int64
+	SurveyID  string
+	Version   int32
+	Schema    []byte
+	CreatedAt pgtype.Timestamptz
 }
 
 type User struct {
-	ID           string
+	ID           int64
+	UserID       string
 	Account      string
 	PasswordHash string
 	Name         string

@@ -21,8 +21,11 @@ type fakeStore struct {
 	createdAccess   string // 记录 CreateSurvey 实际写入的作答模式(新建默认)
 	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
 	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
-	listOwner       string // 记录 ListSurveysByOwner 收到的 ownerID
-	listAllCalled   bool   // 记录是否走了全站列表(admin)
+	listOwner       string  // 记录 ListSurveysByOwner 收到的 ownerID
+	listAllCalled   bool    // 记录是否走了全站列表(admin)
+	listKeyword     *string              // 记录两条列表分支收到的 keyword(nil=不过滤)
+	listParams      dao.SurveyListParams // 记录列表分支收到的完整参数(limit/offset/status/type 断言用)
+	listTotal       int64                // fake 返回的总行数(COUNT(*) OVER())
 	ownerItems      []dao.SurveyListItem
 	allItems        []dao.SurveyListItem
 }
@@ -30,13 +33,17 @@ type fakeStore struct {
 func (f *fakeStore) GetSurvey(_ context.Context, _ string) (dao.SurveyMeta, error) {
 	return f.meta, f.getErr
 }
-func (f *fakeStore) ListSurveysByOwner(_ context.Context, ownerID string) ([]dao.SurveyListItem, error) {
+func (f *fakeStore) ListSurveysByOwner(_ context.Context, ownerID string, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error) {
 	f.listOwner = ownerID
-	return f.ownerItems, nil
+	f.listKeyword = p.Keyword
+	f.listParams = p
+	return f.ownerItems, f.listTotal, nil
 }
-func (f *fakeStore) ListAllSurveys(_ context.Context) ([]dao.SurveyListItem, error) {
+func (f *fakeStore) ListAllSurveys(_ context.Context, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error) {
 	f.listAllCalled = true
-	return f.allItems, nil
+	f.listKeyword = p.Keyword
+	f.listParams = p
+	return f.allItems, f.listTotal, nil
 }
 func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess string) error {
 	f.createdAccess = answerAccess
@@ -80,7 +87,7 @@ func codeOf(t *testing.T, err error) int {
 
 // 归属校验:非本人 → NotFound(不泄露存在性)。
 func TestOwned_NotOwner_ReturnsNotFound(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
 	m := New(f)
 	_, err := m.Get(ctxUser("bob"), api.SurveyGetReq{ID: "s1"})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
@@ -100,7 +107,7 @@ func TestOwned_NotFound_ReturnsNotFound(t *testing.T) {
 
 // 状态机守卫:非 live 结束 → Conflict,且不写状态。
 func TestClose_NotLive_ReturnsConflict(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
 	m := New(f)
 	_, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"})
 	if got := codeOf(t, err); got != ecode.CodeConflict {
@@ -113,7 +120,7 @@ func TestClose_NotLive_ReturnsConflict(t *testing.T) {
 
 // 状态机守卫:live 正常结束 → 写 closed。
 func TestClose_Live_SetsClosed(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
 	m := New(f)
 	if _, err := m.Close(ctxUser("alice"), api.SurveyCloseReq{ID: "s1"}); err != nil {
 		t.Fatalf("live Close 应成功,得到 %v", err)
@@ -125,7 +132,7 @@ func TestClose_Live_SetsClosed(t *testing.T) {
 
 // 重开守卫:closed 但从未发布 → 409。
 func TestReopen_NeverPublished_Returns409(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: nil}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: nil}}
 	m := New(f)
 	_, err := m.Reopen(ctxUser("alice"), api.SurveyReopenReq{ID: "s1"})
 	if got := codeOf(t, err); got != ecode.CodeConflict {
@@ -136,7 +143,7 @@ func TestReopen_NeverPublished_Returns409(t *testing.T) {
 // 重开守卫:closed 且曾发布 → 写 live。
 func TestReopen_Published_SetsLive(t *testing.T) {
 	v := int32(2)
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: &v}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "closed", PublishedVersion: &v}}
 	m := New(f)
 	if _, err := m.Reopen(ctxUser("alice"), api.SurveyReopenReq{ID: "s1"}); err != nil {
 		t.Fatalf("已发布 Reopen 应成功,得到 %v", err)
@@ -159,7 +166,7 @@ func (f *updateFake) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) er
 
 // 编辑守卫:draft 放行 → 写库(UpdateDraft 被调用)。
 func TestUpdate_Draft_Writes(t *testing.T) {
-	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}}
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}}
 	m := New(f)
 	if _, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)}); err != nil {
 		t.Fatalf("draft Update 应成功,得到 %v", err)
@@ -171,7 +178,7 @@ func TestUpdate_Draft_Writes(t *testing.T) {
 
 // 编辑守卫:live 拒 → Conflict,且不写库。
 func TestUpdate_Live_ReturnsConflict(t *testing.T) {
-	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}}
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}}
 	m := New(f)
 	_, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)})
 	if got := codeOf(t, err); got != ecode.CodeConflict {
@@ -184,7 +191,7 @@ func TestUpdate_Live_ReturnsConflict(t *testing.T) {
 
 // 编辑守卫:closed 拒 → Conflict,且不写库。
 func TestUpdate_Closed_ReturnsConflict(t *testing.T) {
-	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "closed"}}}
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "closed"}}}
 	m := New(f)
 	_, err := m.Update(ctxUser("alice"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)})
 	if got := codeOf(t, err); got != ecode.CodeConflict {
@@ -228,7 +235,7 @@ func TestCreate_BadJSON_Returns400(t *testing.T) {
 
 // creator A 访问 creator B 的卷 → 404(第二层归属,防枚举;能力位已过)。
 func TestGet_CreatorCrossUser_ReturnsNotFound(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
 	m := New(f)
 	_, err := m.Get(ctxRole("bob", "creator"), api.SurveyGetReq{ID: "s1"})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
@@ -238,7 +245,7 @@ func TestGet_CreatorCrossUser_ReturnsNotFound(t *testing.T) {
 
 // admin 短路归属:读他人的卷 → 放行(跨 owner)。
 func TestGet_Admin_CrossOwner_Allowed(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft", DraftSchema: []byte(`{"id":"s1"}`)}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft", DraftSchema: []byte(`{"id":"s1"}`)}}
 	m := New(f)
 	resp, err := m.Get(ctxRole("admin-user", "admin"), api.SurveyGetReq{ID: "s1"})
 	if err != nil {
@@ -251,7 +258,7 @@ func TestGet_Admin_CrossOwner_Allowed(t *testing.T) {
 
 // admin 短路归属:改他人 draft 卷 → 放行写库。
 func TestUpdate_Admin_CrossOwner_Writes(t *testing.T) {
-	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}}
+	f := &updateFake{fakeStore: fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}}
 	m := New(f)
 	if _, err := m.Update(ctxRole("admin-user", "admin"), api.SurveyUpdateReq{ID: "s1", Body: []byte(`{"id":"s1"}`)}); err != nil {
 		t.Fatalf("admin 跨 owner 改 draft 应放行,得到 %v", err)
@@ -263,16 +270,16 @@ func TestUpdate_Admin_CrossOwner_Writes(t *testing.T) {
 
 // List:admin → 走全站列表;creator → 走本人列表。
 func TestList_RoleScopes(t *testing.T) {
-	fa := &fakeStore{allItems: []dao.SurveyListItem{{ID: "x"}}}
-	if _, err := New(fa).List(ctxRole("admin-user", "admin")); err != nil {
+	fa := &fakeStore{allItems: []dao.SurveyListItem{{SurveyID: "x"}}}
+	if _, err := New(fa).List(ctxRole("admin-user", "admin"), api.SurveyListReq{}); err != nil {
 		t.Fatalf("admin List 应成功,得到 %v", err)
 	}
 	if !fa.listAllCalled {
 		t.Fatal("admin List 应走全站 ListAllSurveys")
 	}
 
-	fc := &fakeStore{ownerItems: []dao.SurveyListItem{{ID: "y"}}}
-	if _, err := New(fc).List(ctxRole("alice", "creator")); err != nil {
+	fc := &fakeStore{ownerItems: []dao.SurveyListItem{{SurveyID: "y"}}}
+	if _, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{}); err != nil {
 		t.Fatalf("creator List 应成功,得到 %v", err)
 	}
 	if fc.listAllCalled || fc.listOwner != "alice" {
@@ -280,11 +287,134 @@ func TestList_RoleScopes(t *testing.T) {
 	}
 }
 
+// List 搜索:空 Q 不过滤(keyword=nil);非空 Q 去空格后透传两条分支;纯空格视同空。
+func TestList_KeywordPassthrough(t *testing.T) {
+	// 空 Q → keyword 应为 nil(不过滤),admin/creator 两条分支都验。
+	for _, role := range []string{"admin", "creator"} {
+		f := &fakeStore{}
+		if _, err := New(f).List(ctxRole("u", role), api.SurveyListReq{Q: "  "}); err != nil {
+			t.Fatalf("%s List 空 Q 应成功,得到 %v", role, err)
+		}
+		if f.listKeyword != nil {
+			t.Fatalf("%s List 空/空格 Q 应 keyword=nil(不过滤),得到 %q", role, *f.listKeyword)
+		}
+	}
+
+	// 非空 Q → 去首尾空格后透传。creator 分支。
+	fc := &fakeStore{}
+	if _, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Q: "  满意度  "}); err != nil {
+		t.Fatalf("creator List 应成功,得到 %v", err)
+	}
+	if fc.listKeyword == nil || *fc.listKeyword != "满意度" {
+		t.Fatalf("creator List keyword 应为去空格后的 %q,得到 %v", "满意度", fc.listKeyword)
+	}
+
+	// 非空 Q → admin 全站分支也应收到 keyword。
+	fa := &fakeStore{}
+	if _, err := New(fa).List(ctxRole("admin-user", "admin"), api.SurveyListReq{Q: "问卷"}); err != nil {
+		t.Fatalf("admin List 应成功,得到 %v", err)
+	}
+	if !fa.listAllCalled || fa.listKeyword == nil || *fa.listKeyword != "问卷" {
+		t.Fatalf("admin List 应走全站且 keyword=%q,得到 listAll=%v keyword=%v", "问卷", fa.listAllCalled, fa.listKeyword)
+	}
+}
+
+// makeItems 造 n 条列表项(id 唯一),供分页断言。
+func makeItems(n int) []dao.SurveyListItem {
+	out := make([]dao.SurveyListItem, n)
+	for i := 0; i < n; i++ {
+		out[i] = dao.SurveyListItem{SurveyID: string(rune('a' + i)), Title: "t", Type: "survey", Status: "draft"}
+	}
+	return out
+}
+
+// List 默认页大小 10:store 收到 limit=10 offset=0;status/type 透传。
+func TestList_DefaultPageSizeAndFilters(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(3), listTotal: 3}
+	_, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Status: "live", Type: "survey"})
+	if err != nil {
+		t.Fatalf("List 应成功,得到 %v", err)
+	}
+	if fc.listParams.Limit != defaultPageSize || fc.listParams.Offset != 0 {
+		t.Fatalf("默认应 limit=%d offset=0,得到 limit=%d offset=%d", defaultPageSize, fc.listParams.Limit, fc.listParams.Offset)
+	}
+	if fc.listParams.Status == nil || *fc.listParams.Status != "live" {
+		t.Fatalf("status 应透传 live,得到 %v", fc.listParams.Status)
+	}
+	if fc.listParams.Type == nil || *fc.listParams.Type != "survey" {
+		t.Fatalf("type 应透传 survey,得到 %v", fc.listParams.Type)
+	}
+}
+
+// List limit clamp:超上限落 maxPageSize;非正数落默认。
+func TestList_LimitClamp(t *testing.T) {
+	fc := &fakeStore{}
+	_, _ = New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 99999})
+	if fc.listParams.Limit != maxPageSize {
+		t.Fatalf("超上限 limit 应 clamp 到 %d,得到 %d", maxPageSize, fc.listParams.Limit)
+	}
+
+	fc2 := &fakeStore{}
+	_, _ = New(fc2).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: -5})
+	if fc2.listParams.Limit != defaultPageSize {
+		t.Fatalf("非正 limit 应落默认 %d,得到 %d", defaultPageSize, fc2.listParams.Limit)
+	}
+}
+
+// List page→offset:offset=(page-1)*limit;page<1 落 1(offset=0)。
+func TestList_PageOffset(t *testing.T) {
+	fc := &fakeStore{}
+	_, _ = New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 20, Page: 3})
+	if fc.listParams.Offset != 40 || fc.listParams.Limit != 20 {
+		t.Fatalf("page3 size20 应 offset=40 limit=20,得到 offset=%d limit=%d", fc.listParams.Offset, fc.listParams.Limit)
+	}
+
+	fc2 := &fakeStore{}
+	_, _ = New(fc2).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 20, Page: 0})
+	if fc2.listParams.Offset != 0 {
+		t.Fatalf("page<1 应落第一页 offset=0,得到 %d", fc2.listParams.Offset)
+	}
+}
+
+// List total 透传:store 返回的 COUNT(*) OVER() 总数原样出现在响应,供前端算总页数。
+func TestList_TotalPassthrough(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(2), listTotal: 57}
+	resp, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 2, Page: 1})
+	if err != nil {
+		t.Fatalf("List 应成功,得到 %v", err)
+	}
+	if resp.Total != 57 {
+		t.Fatalf("Total 应透传 57,得到 %d", resp.Total)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("应返回当前页 2 条,得到 %d", len(resp.Items))
+	}
+}
+
+// List 搜索态:Q 非空时锁 page1 + limit10 + offset0(搜索不翻页)。
+func TestList_SearchModeNoPaging(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(searchLimit), listTotal: 99}
+	resp, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{
+		Q:     "问卷",
+		Limit: 50, // 搜索态应被忽略
+		Page:  5,  // 搜索态应被忽略
+	})
+	if err != nil {
+		t.Fatalf("搜索 List 应成功,得到 %v", err)
+	}
+	if fc.listParams.Limit != searchLimit || fc.listParams.Offset != 0 {
+		t.Fatalf("搜索态应锁 limit=%d offset=0,得到 limit=%d offset=%d", searchLimit, fc.listParams.Limit, fc.listParams.Offset)
+	}
+	if len(resp.Items) != searchLimit {
+		t.Fatalf("搜索态应返回前 %d 条,得到 %d", searchLimit, len(resp.Items))
+	}
+}
+
 // 注:List 的 respondent→403 属第一层能力位,已上移中间件,回归测试见端点级。
 
 // SetAnswerAccess:draft 问卷设 login_required → 写列成功。
 func TestSetAnswerAccess_Draft_Succeeds(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
 	if _, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "login_required"}); err != nil {
 		t.Fatalf("draft 设作答模式应成功,得到 %v", err)
 	}
@@ -295,7 +425,7 @@ func TestSetAnswerAccess_Draft_Succeeds(t *testing.T) {
 
 // SetAnswerAccess:live 问卷 → Conflict(仅 draft 可改),且不写库。
 func TestSetAnswerAccess_Live_ReturnsConflict(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "live"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
 	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"})
 	if got := codeOf(t, err); got != ecode.CodeConflict {
 		t.Fatalf("live 设作答模式 code = %d, want CodeConflict", got)
@@ -307,7 +437,7 @@ func TestSetAnswerAccess_Live_ReturnsConflict(t *testing.T) {
 
 // SetAnswerAccess:非 owner → NotFound(归属防枚举),不写库。
 func TestSetAnswerAccess_NotOwner_ReturnsNotFound(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "bob", Status: "draft"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "bob", Status: "draft"}}
 	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
 		t.Fatalf("非 owner code = %d, want CodeNotFound", got)
@@ -319,7 +449,7 @@ func TestSetAnswerAccess_NotOwner_ReturnsNotFound(t *testing.T) {
 
 // SetAnswerAccess:非法值 → BadRequest,不写库。
 func TestSetAnswerAccess_InvalidValue_ReturnsBadRequest(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
 	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "bogus"})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("非法值 code = %d, want CodeBadRequest", got)
@@ -332,7 +462,7 @@ func TestSetAnswerAccess_InvalidValue_ReturnsBadRequest(t *testing.T) {
 // Publish 不再改 answer_access:发布只冻结版本 + 转 live(作答模式由 SetAnswerAccess 定,单一真相源)。
 // fakeStore.Publish 已无 answerAccess 形参,此处仅确认发布成功、不触碰作答模式写入路径。
 func TestPublish_DoesNotTouchAnswerAccess(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}, publishVer: 1}
 	if _, err := New(f).Publish(ctxUser("alice"), api.SurveyPublishReq{ID: "s1"}); err != nil {
 		t.Fatalf("发布应成功,得到 %v", err)
 	}

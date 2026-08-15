@@ -3,6 +3,7 @@ package http
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,13 +12,23 @@ import (
 )
 
 func (s *Server) listSurveys(c *gin.Context) {
-	resp, err := s.surveys.List(c.Request.Context())
+	// 全部可选 query 参数:q(标题搜索)/status/type(过滤)/limit(页大小)/page(页码,1-based)。
+	// limit/page 非数字按 0 处理(service 落默认);空参数即旧全量首页行为。
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	page, _ := strconv.Atoi(c.Query("page"))
+	resp, err := s.surveys.List(c.Request.Context(), api.SurveyListReq{
+		Q:      c.Query("q"),
+		Status: c.Query("status"),
+		Type:   c.Query("type"),
+		Limit:  limit,
+		Page:   page,
+	})
 	if err != nil {
 		render.JSON(c, nil, err)
 		return
 	}
-	// Items 直接作信封 data → data:[...];UpdatedAt 已在 service 格式化为 RFC3339 字符串。
-	render.JSON(c, resp.Items, nil)
+	// 整个 resp 作信封 data → data:{items,total};UpdatedAt 已在 service 格式化为 RFC3339。
+	render.JSON(c, resp, nil)
 }
 
 // createSurvey POST /api/surveys —— 首存落库,返回 { id }(后端分配 id)。

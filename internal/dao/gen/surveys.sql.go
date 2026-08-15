@@ -12,12 +12,12 @@ import (
 )
 
 const createSurvey = `-- name: CreateSurvey :exec
-INSERT INTO surveys (id, owner_id, type, title, status, draft_schema, answer_access)
+INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access)
 VALUES ($1, $2, $3, $4, 'draft', $5, $6)
 `
 
 type CreateSurveyParams struct {
-	ID           string
+	SurveyID     string
 	OwnerID      string
 	Type         string
 	Title        string
@@ -29,7 +29,7 @@ type CreateSurveyParams struct {
 // 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
 func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) error {
 	_, err := q.db.Exec(ctx, createSurvey,
-		arg.ID,
+		arg.SurveyID,
 		arg.OwnerID,
 		arg.Type,
 		arg.Title,
@@ -42,27 +42,40 @@ func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) erro
 const getPublishedSchema = `-- name: GetPublishedSchema :one
 SELECT sv.schema
 FROM surveys s
-JOIN survey_versions sv ON sv.survey_id = s.id AND sv.version = s.published_version
-WHERE s.id = $1 AND s.status = 'live'
+JOIN survey_versions sv ON sv.survey_id = s.survey_id AND sv.version = s.published_version
+WHERE s.survey_id = $1 AND s.status = 'live'
 `
 
-func (q *Queries) GetPublishedSchema(ctx context.Context, id string) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getPublishedSchema, id)
+func (q *Queries) GetPublishedSchema(ctx context.Context, surveyID string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getPublishedSchema, surveyID)
 	var schema []byte
 	err := row.Scan(&schema)
 	return schema, err
 }
 
 const getSurvey = `-- name: GetSurvey :one
-SELECT id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
-FROM surveys WHERE id = $1
+SELECT survey_id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
+FROM surveys WHERE survey_id = $1
 `
 
-func (q *Queries) GetSurvey(ctx context.Context, id string) (Survey, error) {
-	row := q.db.QueryRow(ctx, getSurvey, id)
-	var i Survey
+type GetSurveyRow struct {
+	SurveyID         string
+	OwnerID          string
+	Type             string
+	Title            string
+	Status           string
+	DraftSchema      []byte
+	PublishedVersion *int32
+	AnswerAccess     string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetSurvey(ctx context.Context, surveyID string) (GetSurveyRow, error) {
+	row := q.db.QueryRow(ctx, getSurvey, surveyID)
+	var i GetSurveyRow
 	err := row.Scan(
-		&i.ID,
+		&i.SurveyID,
 		&i.OwnerID,
 		&i.Type,
 		&i.Title,
@@ -113,22 +126,42 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) er
 }
 
 const listAllSurveys = `-- name: ListAllSurveys :many
-SELECT id, title, type, status, updated_at
+SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
 FROM surveys
-ORDER BY created_at DESC
+WHERE ($1::text IS NULL OR title ILIKE '%' || $1 || '%')
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR type = $3)
+ORDER BY created_at DESC, id DESC
+LIMIT $5 OFFSET $4
 `
 
+type ListAllSurveysParams struct {
+	Keyword *string
+	Status  *string
+	Type    *string
+	Off     int32
+	Lim     int32
+}
+
 type ListAllSurveysRow struct {
-	ID        string
+	SurveyID  string
 	Title     string
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
+	Total     int64
 }
 
 // admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
-func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, error) {
-	rows, err := q.db.Query(ctx, listAllSurveys)
+// 过滤/分页语义同 ListSurveysByOwner。
+func (q *Queries) ListAllSurveys(ctx context.Context, arg ListAllSurveysParams) ([]ListAllSurveysRow, error) {
+	rows, err := q.db.Query(ctx, listAllSurveys,
+		arg.Keyword,
+		arg.Status,
+		arg.Type,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +170,12 @@ func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, erro
 	for rows.Next() {
 		var i ListAllSurveysRow
 		if err := rows.Scan(
-			&i.ID,
+			&i.SurveyID,
 			&i.Title,
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}
@@ -154,21 +188,46 @@ func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, erro
 }
 
 const listSurveysByOwner = `-- name: ListSurveysByOwner :many
-SELECT id, title, type, status, updated_at
-FROM surveys WHERE owner_id = $1
-ORDER BY created_at DESC
+SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
+FROM surveys
+WHERE owner_id = $1
+  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%')
+  AND ($3::text IS NULL OR status = $3)
+  AND ($4::text IS NULL OR type = $4)
+ORDER BY created_at DESC, id DESC
+LIMIT $6 OFFSET $5
 `
 
+type ListSurveysByOwnerParams struct {
+	OwnerID string
+	Keyword *string
+	Status  *string
+	Type    *string
+	Off     int32
+	Lim     int32
+}
+
 type ListSurveysByOwnerRow struct {
-	ID        string
+	SurveyID  string
 	Title     string
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
+	Total     int64
 }
 
-func (q *Queries) ListSurveysByOwner(ctx context.Context, ownerID string) ([]ListSurveysByOwnerRow, error) {
-	rows, err := q.db.Query(ctx, listSurveysByOwner, ownerID)
+// creator 本人列表。offset 分页:ORDER BY created_at DESC, id DESC(id=代理键,单调,兜底稳定序)。
+// 投影业务键 survey_id(对外身份);过滤参数为空(nil)时短路不生效。
+// COUNT(*) OVER() 返回筛选后总行数(LIMIT 前计数),供前端算总页数。
+func (q *Queries) ListSurveysByOwner(ctx context.Context, arg ListSurveysByOwnerParams) ([]ListSurveysByOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listSurveysByOwner,
+		arg.OwnerID,
+		arg.Keyword,
+		arg.Status,
+		arg.Type,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +236,12 @@ func (q *Queries) ListSurveysByOwner(ctx context.Context, ownerID string) ([]Lis
 	for rows.Next() {
 		var i ListSurveysByOwnerRow
 		if err := rows.Scan(
-			&i.ID,
+			&i.SurveyID,
 			&i.Title,
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}
@@ -208,61 +268,61 @@ func (q *Queries) MaxVersion(ctx context.Context, surveyID string) (int32, error
 const setAnswerAccess = `-- name: SetAnswerAccess :exec
 UPDATE surveys
 SET answer_access = $2, updated_at = now()
-WHERE id = $1
+WHERE survey_id = $1
 `
 
 type SetAnswerAccessParams struct {
-	ID           string
+	SurveyID     string
 	AnswerAccess string
 }
 
 // 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
 func (q *Queries) SetAnswerAccess(ctx context.Context, arg SetAnswerAccessParams) error {
-	_, err := q.db.Exec(ctx, setAnswerAccess, arg.ID, arg.AnswerAccess)
+	_, err := q.db.Exec(ctx, setAnswerAccess, arg.SurveyID, arg.AnswerAccess)
 	return err
 }
 
 const setPublished = `-- name: SetPublished :exec
 UPDATE surveys
 SET published_version = $2, status = 'live', updated_at = now()
-WHERE id = $1
+WHERE survey_id = $1
 `
 
 type SetPublishedParams struct {
-	ID               string
+	SurveyID         string
 	PublishedVersion *int32
 }
 
 // 只冻结版本 + 转 live;不碰 answer_access —— 作答模式由 draft 阶段经 SetAnswerAccess 设定(单一真相源)。
 func (q *Queries) SetPublished(ctx context.Context, arg SetPublishedParams) error {
-	_, err := q.db.Exec(ctx, setPublished, arg.ID, arg.PublishedVersion)
+	_, err := q.db.Exec(ctx, setPublished, arg.SurveyID, arg.PublishedVersion)
 	return err
 }
 
 const setStatus = `-- name: SetStatus :exec
 UPDATE surveys
 SET status = $2, updated_at = now()
-WHERE id = $1
+WHERE survey_id = $1
 `
 
 type SetStatusParams struct {
-	ID     string
-	Status string
+	SurveyID string
+	Status   string
 }
 
 func (q *Queries) SetStatus(ctx context.Context, arg SetStatusParams) error {
-	_, err := q.db.Exec(ctx, setStatus, arg.ID, arg.Status)
+	_, err := q.db.Exec(ctx, setStatus, arg.SurveyID, arg.Status)
 	return err
 }
 
 const updateDraft = `-- name: UpdateDraft :exec
 UPDATE surveys
 SET draft_schema = $2, title = $3, type = $4, updated_at = now()
-WHERE id = $1
+WHERE survey_id = $1
 `
 
 type UpdateDraftParams struct {
-	ID          string
+	SurveyID    string
 	DraftSchema []byte
 	Title       string
 	Type        string
@@ -270,7 +330,7 @@ type UpdateDraftParams struct {
 
 func (q *Queries) UpdateDraft(ctx context.Context, arg UpdateDraftParams) error {
 	_, err := q.db.Exec(ctx, updateDraft,
-		arg.ID,
+		arg.SurveyID,
 		arg.DraftSchema,
 		arg.Title,
 		arg.Type,

@@ -66,10 +66,10 @@ func (m *Manager) Login(ctx context.Context, req api.AuthLoginReq) (api.AuthLogi
 		return api.AuthLoginResp{}, ecode.Internal("内部错误")
 	}
 	expires := time.Now().Add(m.sessionTTL)
-	if err := m.store.CreateSession(ctx, token, u.ID, expires); err != nil {
+	if err := m.store.CreateSession(ctx, token, u.UserID, expires); err != nil {
 		return api.AuthLoginResp{}, err
 	}
-	return api.AuthLoginResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Role: u.Role}, Token: token, Expires: expires}, nil
+	return api.AuthLoginResp{User: api.AuthUser{ID: u.UserID, Name: u.Name, Role: u.Role}, Token: token, Expires: expires}, nil
 }
 
 // Logout 删会话(token 从 ctx metadata 取;为空则无操作)。
@@ -86,7 +86,7 @@ func (m *Manager) Me(ctx context.Context) (api.AuthMeResp, error) {
 	if err != nil {
 		return api.AuthMeResp{}, err
 	}
-	return api.AuthMeResp{User: api.AuthUser{ID: u.ID, Name: u.Name, Role: u.Role}}, nil
+	return api.AuthMeResp{User: api.AuthUser{ID: u.UserID, Name: u.Name, Role: u.Role}}, nil
 }
 
 // ValidateSession 校验会话 token:查无/无效 → Unauthorized("会话无效");

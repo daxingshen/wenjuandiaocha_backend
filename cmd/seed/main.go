@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
-	"wenjuandiaocha_backend/internal/lib/auth"
 	"wenjuandiaocha_backend/internal/config"
 	"wenjuandiaocha_backend/internal/dao"
+	"wenjuandiaocha_backend/internal/lib/auth"
 )
 
 func main() {
@@ -53,10 +53,10 @@ func main() {
 		slog.Error("密码哈希失败", "err", err)
 		os.Exit(1)
 	}
-	u := dao.User{ID: "u_" + randSuffix(), Account: *account, PasswordHash: hash, Name: *name, Role: *role}
+	u := dao.User{UserID: "u_" + randSuffix(), Account: *account, PasswordHash: hash, Name: *name, Role: *role}
 	if err := st.CreateUser(ctx, u); err != nil {
 		slog.Error("建账号失败", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("seed 账号已建", "account", *account, "id", u.ID, "role", *role)
+	slog.Info("seed 账号已建", "account", *account, "id", u.UserID, "role", *role)
 }

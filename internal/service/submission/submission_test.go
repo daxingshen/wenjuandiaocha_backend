@@ -50,14 +50,14 @@ func codeOf(t *testing.T, err error) int {
 	return c
 }
 
-func liveMeta() dao.SurveyMeta { return dao.SurveyMeta{ID: "s1", Status: "live"} }
+func liveMeta() dao.SurveyMeta { return dao.SurveyMeta{SurveyID: "s1", Status: "live"} }
 
 // 空 schema(无题无规则)的最小合法 JSON。
 const emptySchema = `{"id":"s1","type":"survey","title":"t","version":3,"questions":[],"rules":[]}`
 
 // 收答守卫:非 live → NotFound。
 func TestSubmit_NotLive_ReturnsNotFound(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "closed"}}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "closed"}}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
@@ -126,7 +126,7 @@ func ctxRole(role string) context.Context {
 // 作答模式闸门:login_required 问卷经匿名路径提交(无会话)→ 401 需登录。
 // 公开 GET 已回显 answerAccess,需登录本非秘密,故直白 401 而非伪装 404。
 func TestSubmit_LoginRequired_AnonPath_ReturnsUnauthorized(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}}) // 无 UserID = 匿名
 	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
@@ -139,7 +139,7 @@ func TestSubmit_LoginRequired_AnonPath_ReturnsUnauthorized(t *testing.T) {
 
 // 作答模式闸门:anonymous 问卷经鉴权路径提交 → BadRequest(引导走 /public)。
 func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
@@ -149,7 +149,7 @@ func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 
 // 能力位:creator 经鉴权路径提交 login_required 问卷 → 403(creator 不能作答)。
 func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeForbidden {
@@ -162,7 +162,7 @@ func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
 
 // respondent 经鉴权路径提交 login_required 问卷 → 成功落库。
 func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if err != nil {
@@ -175,7 +175,7 @@ func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
 
 // admin 经鉴权路径提交 login_required 问卷 → 成功(超级权限保留作答)。
 func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if err != nil {
@@ -188,7 +188,7 @@ func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
 
 // 匿名问卷经匿名路径提交(现状)→ 成功,行为不变。
 func TestSubmit_Anonymous_AnonPath_Succeeds(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if err != nil {
@@ -204,7 +204,7 @@ func TestSubmit_Anonymous_AnonPath_Succeeds(t *testing.T) {
 func TestSubmit_ValidationFails_ReturnsValidationError(t *testing.T) {
 	// schema 含一道必答单选题;提交空答案 → 必答校验不过。
 	const requiredSchema = `{"id":"s1","type":"survey","title":"t","version":3,"questions":[{"id":"q1","type":"single","title":"Q1","required":true,"options":[{"id":"o1","label":"A"}]}],"rules":[]}`
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(requiredSchema)}
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(requiredSchema)}
 	m := New(f)
 	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeValidation {
@@ -232,7 +232,7 @@ func TestGetPublished_NotFound_ReturnsNotFound(t *testing.T) {
 // GetPublished 带出 answer_access:login_required 问卷返回该模式,供前端选登录作答路径。
 func TestGetPublished_ReturnsAnswerAccess(t *testing.T) {
 	f := &fakeStore{
-		meta:          dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"},
+		meta:          dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "login_required"},
 		publishedJSON: []byte(emptySchema),
 	}
 	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
@@ -247,7 +247,7 @@ func TestGetPublished_ReturnsAnswerAccess(t *testing.T) {
 // GetPublished 空 answer_access(历史数据)按 anonymous 回落,不返回空串误导前端。
 func TestGetPublished_EmptyAccess_FallsBackAnonymous(t *testing.T) {
 	f := &fakeStore{
-		meta:          dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: ""},
+		meta:          dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: ""},
 		publishedJSON: []byte(emptySchema),
 	}
 	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})

@@ -1,5 +1,5 @@
 -- name: InsertResponse :exec
-INSERT INTO responses (id, survey_id, survey_version, raw, meta)
+INSERT INTO responses (response_id, survey_id, survey_version, raw, meta)
 VALUES ($1, $2, $3, $4, $5);
 
 -- name: InsertAnswerRow :exec

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/wire"
@@ -22,8 +23,8 @@ import (
 // Store 是本层依赖的 dao 子集(消费方定义接口,便于单测注入 fake)。*dao.Store 实现它。
 type Store interface {
 	GetSurvey(ctx context.Context, id string) (dao.SurveyMeta, error)
-	ListSurveysByOwner(ctx context.Context, ownerID string) ([]dao.SurveyListItem, error)
-	ListAllSurveys(ctx context.Context) ([]dao.SurveyListItem, error)
+	ListSurveysByOwner(ctx context.Context, ownerID string, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error)
+	ListAllSurveys(ctx context.Context, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error)
 	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error
 	UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error
 	SetStatus(ctx context.Context, id, status string) error
@@ -38,7 +39,7 @@ type Store interface {
 // Service 是问卷 studio 业务契约。*Manager 实现它;传输层持本接口。
 // ownerID 来自 ctx 的 metadata.Metadata(传输层注入),不进 Req。
 type Service interface {
-	List(ctx context.Context) (api.SurveyListResp, error)
+	List(ctx context.Context, req api.SurveyListReq) (api.SurveyListResp, error)
 	Create(ctx context.Context, req api.SurveyCreateReq) (api.SurveyCreateResp, error)
 	Get(ctx context.Context, req api.SurveyGetReq) (api.SurveyGetResp, error)
 	Update(ctx context.Context, req api.SurveyUpdateReq) (api.SurveyUpdateResp, error)
@@ -91,27 +92,75 @@ func (m *Manager) owned(ctx context.Context, id string) (dao.SurveyMeta, error) 
 	return meta, nil
 }
 
+// 列表分页参数:默认页大小 10,上限 100;搜索态固定前 searchLimit 条。
+const (
+	defaultPageSize = 10
+	maxPageSize     = 100
+	searchLimit     = 10
+)
+
 // List 问卷列表:admin 全站,creator 仅本人,respondent 无权(第一层能力位挡下)。
-// ownerID/role 从 ctx metadata 取。
-func (m *Manager) List(ctx context.Context) (api.SurveyListResp, error) {
+// offset 分页(ORDER BY created_at DESC, id DESC);keyword/status/type 透传两条分支。
+// 搜索态(Q 非空):锁 page=1、limit=10、只返回前 10 条(搜索不翻页,前端隐藏页码器)。
+// 返回 Total 为筛选后总行数(COUNT(*) OVER()),供前端算总页数。ownerID/role 从 ctx metadata 取。
+func (m *Manager) List(ctx context.Context, req api.SurveyListReq) (api.SurveyListResp, error) {
+	keyword := trimToPtr(req.Q)
+	searching := keyword != nil
+
+	p := dao.SurveyListParams{
+		Keyword: keyword,
+		Status:  trimToPtr(req.Status),
+		Type:    trimToPtr(req.Type),
+	}
+	if searching {
+		// 搜索态:锁前 10 条第一页,不翻页。
+		p.Limit = searchLimit
+		p.Offset = 0
+	} else {
+		size := req.Limit
+		if size <= 0 {
+			size = defaultPageSize
+		}
+		if size > maxPageSize {
+			size = maxPageSize
+		}
+		page := req.Page
+		if page < 1 {
+			page = 1
+		}
+		p.Limit = int32(size)
+		p.Offset = int32((page - 1) * size)
+	}
+
 	var rows []dao.SurveyListItem
+	var total int64
 	var err error
 	if rbac.IsAdmin(roleOf(ctx)) {
-		rows, err = m.store.ListAllSurveys(ctx) // admin 全站视角
+		rows, total, err = m.store.ListAllSurveys(ctx, p) // admin 全站视角
 	} else {
-		rows, err = m.store.ListSurveysByOwner(ctx, metadata.From(ctx).UserID) // creator 仅本人
+		rows, total, err = m.store.ListSurveysByOwner(ctx, metadata.From(ctx).UserID, p) // creator 仅本人
 	}
 	if err != nil {
 		return api.SurveyListResp{}, err
 	}
+
 	items := make([]api.SurveyListItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, api.SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status,
-			UpdatedAt: r.UpdatedAt.Format(time.RFC3339), // 对外 RFC3339 字符串(前端契约),原在 http handler 格式化,收敛后移入此处
+			ID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status,
+			UpdatedAt: r.UpdatedAt.Format(time.RFC3339), // 对外 RFC3339 字符串(前端契约)
 		})
 	}
-	return api.SurveyListResp{Items: items}, nil
+	return api.SurveyListResp{Items: items, Total: int(total)}, nil
+}
+
+// trimToPtr 去首尾空格,空串返回 nil(用于可选过滤参数:nil=不过滤)。
+func trimToPtr(s string) *string {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return nil
+	}
+	return &t
 }
 
 // Create 首存落库:后端强制分配 id(忽略客户端传的 id,防越权/串号)、补 schema 默认值。
@@ -174,7 +223,7 @@ func (m *Manager) Update(ctx context.Context, req api.SurveyUpdateReq) (api.Surv
 	if err := json.Unmarshal(req.Body, &schema); err != nil {
 		return api.SurveyUpdateResp{}, ecode.BadRequest("schema 格式错误")
 	}
-	if err := m.store.UpdateDraft(ctx, meta.ID, schema.Title, string(schema.Type), req.Body); err != nil {
+	if err := m.store.UpdateDraft(ctx, meta.SurveyID, schema.Title, string(schema.Type), req.Body); err != nil {
 		return api.SurveyUpdateResp{}, err
 	}
 	return api.SurveyUpdateResp{}, nil
@@ -187,7 +236,7 @@ func (m *Manager) Publish(ctx context.Context, req api.SurveyPublishReq) (api.Su
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
-	version, unchanged, err := m.store.Publish(ctx, meta.ID, meta.DraftSchema)
+	version, unchanged, err := m.store.Publish(ctx, meta.SurveyID, meta.DraftSchema)
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
@@ -208,7 +257,7 @@ func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAc
 	if meta.Status != domain.StatusDraft {
 		return api.SurveySetAnswerAccessResp{}, ecode.Conflict(msgEditForbidden)
 	}
-	if err := m.store.SetAnswerAccess(ctx, meta.ID, req.AnswerAccess); err != nil {
+	if err := m.store.SetAnswerAccess(ctx, meta.SurveyID, req.AnswerAccess); err != nil {
 		return api.SurveySetAnswerAccessResp{}, err
 	}
 	return api.SurveySetAnswerAccessResp{}, nil
@@ -223,7 +272,7 @@ func (m *Manager) Close(ctx context.Context, req api.SurveyCloseReq) (api.Survey
 	if meta.Status != domain.StatusLive {
 		return api.SurveyCloseResp{}, ecode.Conflict(msgCloseNotLive)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusClosed); err != nil {
+	if err := m.store.SetStatus(ctx, meta.SurveyID, domain.StatusClosed); err != nil {
 		return api.SurveyCloseResp{}, err
 	}
 	return api.SurveyCloseResp{}, nil
@@ -238,7 +287,7 @@ func (m *Manager) Reopen(ctx context.Context, req api.SurveyReopenReq) (api.Surv
 	if meta.Status != domain.StatusClosed || meta.PublishedVersion == nil {
 		return api.SurveyReopenResp{}, ecode.Conflict(msgReopenInvalid)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusLive); err != nil {
+	if err := m.store.SetStatus(ctx, meta.SurveyID, domain.StatusLive); err != nil {
 		return api.SurveyReopenResp{}, err
 	}
 	return api.SurveyReopenResp{}, nil
@@ -250,7 +299,7 @@ func (m *Manager) Stats(ctx context.Context, req api.SurveyStatsReq) (api.Survey
 	if err != nil {
 		return api.SurveyStatsResp{}, err
 	}
-	count, err := m.store.CountResponses(ctx, meta.ID)
+	count, err := m.store.CountResponses(ctx, meta.SurveyID)
 	if err != nil {
 		return api.SurveyStatsResp{}, err
 	}
