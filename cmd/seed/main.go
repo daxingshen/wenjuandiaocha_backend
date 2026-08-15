@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
-	"wenjuandiaocha_backend/internal/auth"
+	"wenjuandiaocha_backend/internal/lib/auth"
 	"wenjuandiaocha_backend/internal/config"
 	"wenjuandiaocha_backend/internal/dao"
 )

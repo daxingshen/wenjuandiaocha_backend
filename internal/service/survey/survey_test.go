@@ -8,6 +8,7 @@ import (
 	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/ecode"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // fakeStore 只实现被测路径需要的方法;其余返回零值。
@@ -64,7 +65,7 @@ func ctxUser(uid string) context.Context {
 
 // ctxRole 造带指定用户 id + 角色的 ctx(RBAC 判定用)。
 func ctxRole(uid, role string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{UserID: uid, Role: role})
+	return metadata.With(context.Background(), metadata.Metadata{UserID: uid, Role: role})
 }
 
 // codeOf 提取业务错误码(信封化后 FromError 返回 ecode.Code*,不再是 HTTP status)。
@@ -221,27 +222,9 @@ func TestCreate_BadJSON_Returns400(t *testing.T) {
 	}
 }
 
-// --- RBAC 第一层能力位 + 第二层归属(admin 短路)---
-
-// respondent 调创作端动作 → 403(第一层能力位;它只能作答)。
-func TestGet_Respondent_ReturnsForbidden403(t *testing.T) {
-	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", OwnerID: "alice", Status: "draft"}}
-	m := New(f)
-	_, err := m.Get(ctxRole("bob", "respondent"), api.SurveyGetReq{ID: "s1"})
-	if got := codeOf(t, err); got != ecode.CodeForbidden {
-		t.Fatalf("respondent 读创作端 code = %d, want CodeForbidden(403)", got)
-	}
-}
-
-// respondent 建卷 → 403(能力位挡下,不落库)。
-func TestCreate_Respondent_ReturnsForbidden403(t *testing.T) {
-	f := &fakeStore{}
-	m := New(f)
-	_, err := m.Create(ctxRole("bob", "respondent"), api.SurveyCreateReq{Body: nil})
-	if got := codeOf(t, err); got != ecode.CodeForbidden {
-		t.Fatalf("respondent 建卷 code = %d, want CodeForbidden(403)", got)
-	}
-}
+// --- RBAC 第二层归属(admin 短路)---
+// 注:第一层能力位(respondent 调创作端 → 403)已上移到 RequireAuth 中间件,
+// 其回归测试在 internal/server/http 端点级(能力位真正生效的位置);此处只测归属。
 
 // creator A 访问 creator B 的卷 → 404(第二层归属,防枚举;能力位已过)。
 func TestGet_CreatorCrossUser_ReturnsNotFound(t *testing.T) {
@@ -297,14 +280,7 @@ func TestList_RoleScopes(t *testing.T) {
 	}
 }
 
-// List:respondent → 403(无列问卷能力)。
-func TestList_Respondent_ReturnsForbidden403(t *testing.T) {
-	f := &fakeStore{}
-	_, err := New(f).List(ctxRole("bob", "respondent"))
-	if got := codeOf(t, err); got != ecode.CodeForbidden {
-		t.Fatalf("respondent List code = %d, want CodeForbidden(403)", got)
-	}
-}
+// 注:List 的 respondent→403 属第一层能力位,已上移中间件,回归测试见端点级。
 
 // SetAnswerAccess:draft 问卷设 login_required → 写列成功。
 func TestSetAnswerAccess_Draft_Succeeds(t *testing.T) {

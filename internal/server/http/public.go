@@ -8,13 +8,11 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"wenjuandiaocha_backend/api"
-	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/lib/ratelimit"
 	"wenjuandiaocha_backend/internal/server/http/render"
 )
@@ -22,28 +20,15 @@ import (
 // submitLimiter:提交答卷限频。每 IP 平均 1 次/秒,突发 10。
 var submitLimiter = ratelimit.New(1, 10)
 
-// publicSurveyResp 公开加载响应:已发布快照 + 作答访问模式。
-// schema 用 RawMessage 原样嵌入(不二次转义);answerAccess 让前端加载即知走匿名/登录作答路径。
-type publicSurveyResp struct {
-	Schema       json.RawMessage `json:"schema"`
-	AnswerAccess string          `json:"answerAccess"`
-}
-
 // getPublicSurvey GET /api/public/surveys/:id —— 返回已发布快照 + answerAccess。
 func (s *Server) getPublicSurvey(c *gin.Context) {
 	resp, err := s.submissions.GetPublished(c.Request.Context(), api.GetPublishedReq{ID: c.Param("id")})
 	if err != nil {
-		render.Error(c, err)
+		render.JSON(c, nil, err)
 		return
 	}
-	render.Success(c, publicSurveyResp{Schema: json.RawMessage(resp.Schema), AnswerAccess: resp.AnswerAccess})
-}
-
-type submitReq struct {
-	Answers domain.Answers `json:"answers"`
-	// Version 作答者实际看到的问卷版本(版本锚定提交)。>0 时后端按该版快照校验落库,
-	// 消除「作答中所有者重发新版 → 拿没见过的题报必答」死局。0/缺省 = 旧客户端,回落当前发布版。
-	Version int32 `json:"version"`
+	// GetPublishedResp{Schema(RawMessage 原样),AnswerAccess} 作 data → data:{schema,answerAccess}。
+	render.JSON(c, resp, nil)
 }
 
 // submitAnswers POST /api/public/surveys/:id/answers —— 限频 + 权威校验 + 双写落库。
@@ -53,25 +38,16 @@ func (s *Server) submitAnswers(c *gin.Context) {
 		return
 	}
 
-	var req submitReq
+	// api.SubmitReq 带 json tag(answers/version),bind body 后从 c.Param 覆盖 SurveyID。
+	var req api.SubmitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
 		return
 	}
+	req.SurveyID = c.Param("id")
 
 	// ip/ua 已由全局 clientInfo 中间件注入 ctx metadata,submission service 从中采集存 meta。
-	res, err := s.submissions.Submit(c.Request.Context(), api.SubmitReq{
-		SurveyID: c.Param("id"),
-		Answers:  req.Answers,
-		Version:  req.Version,
-	})
-	if err != nil {
-		render.Error(c, err)
-		return
-	}
-	if len(res.ValidationErrors) > 0 {
-		render.Validation(c, res.ValidationErrors)
-		return
-	}
-	render.Success(c, gin.H{"rows": res.Rows})
+	// 校验失败由 service 返回 ecode.Validation,render.JSON 渲染进 data:{errors};成功 → data:{rows}。
+	res, err := s.submissions.Submit(c.Request.Context(), req)
+	render.JSON(c, res, err)
 }

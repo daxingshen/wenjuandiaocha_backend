@@ -8,6 +8,7 @@ import (
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // fakeStore 记录调用,按字段返回预设结果。
@@ -58,7 +59,7 @@ const emptySchema = `{"id":"s1","type":"survey","title":"t","version":3,"questio
 func TestSubmit_NotLive_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "closed"}}
 	m := New(f)
-	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
 		t.Fatalf("closed 提交 code = %d, want CodeNotFound", got)
 	}
@@ -68,7 +69,7 @@ func TestSubmit_NotLive_ReturnsNotFound(t *testing.T) {
 func TestSubmit_SurveyNotFound_ReturnsNotFound(t *testing.T) {
 	f := &fakeStore{metaErr: dao.ErrNotFound}
 	m := New(f)
-	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeNotFound {
 		t.Fatalf("查无提交 code = %d, want CodeNotFound", got)
 	}
@@ -78,9 +79,9 @@ func TestSubmit_SurveyNotFound_ReturnsNotFound(t *testing.T) {
 func TestSubmit_VersionPinned_UsesVersionSchema(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), versionJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Version: 3})
-	if err != nil || len(res.ValidationErrors) > 0 {
-		t.Fatalf("空 schema 提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}, Version: 3})
+	if err != nil {
+		t.Fatalf("空 schema 提交应成功: err=%v", err)
 	}
 	if !f.versionCalled {
 		t.Fatal("version>0 应调用 GetVersionSchema")
@@ -94,7 +95,7 @@ func TestSubmit_VersionPinned_UsesVersionSchema(t *testing.T) {
 func TestSubmit_VersionStale_ReturnsBadRequest(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), versionErr: dao.ErrNotFound}
 	m := New(f)
-	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}, Version: 9})
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}, Version: 9})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("失效版本提交 code = %d, want CodeBadRequest", got)
 	}
@@ -104,9 +105,9 @@ func TestSubmit_VersionStale_ReturnsBadRequest(t *testing.T) {
 func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 	f := &fakeStore{meta: liveMeta(), publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if err != nil || len(res.ValidationErrors) > 0 {
-		t.Fatalf("回落发布版提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
+	if err != nil {
+		t.Fatalf("回落发布版提交应成功: err=%v", err)
 	}
 	if f.versionCalled {
 		t.Fatal("version==0 不应调用 GetVersionSchema")
@@ -119,7 +120,7 @@ func TestSubmit_NoVersion_FallsBackToPublished(t *testing.T) {
 // ctxRole 造一个「已登录」ctx:带真实会话身份(UserID)+ 角色。
 // UserID 非空 = submission 据此判定为已登录路径(等价 requireAuth 注入后的 ctx)。
 func ctxRole(role string) context.Context {
-	return api.WithMetadata(context.Background(), api.Metadata{UserID: "u_" + role, Role: role})
+	return metadata.With(context.Background(), metadata.Metadata{UserID: "u_" + role, Role: role})
 }
 
 // 作答模式闸门:login_required 问卷经匿名路径提交(无会话)→ 401 需登录。
@@ -127,7 +128,7 @@ func ctxRole(role string) context.Context {
 func TestSubmit_LoginRequired_AnonPath_ReturnsUnauthorized(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}}) // 无 UserID = 匿名
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}}) // 无 UserID = 匿名
 	if got := codeOf(t, err); got != ecode.CodeUnauthorized {
 		t.Fatalf("login_required 匿名提交 code = %d, want CodeUnauthorized(401)", got)
 	}
@@ -140,7 +141,7 @@ func TestSubmit_LoginRequired_AnonPath_ReturnsUnauthorized(t *testing.T) {
 func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("anonymous 鉴权提交 code = %d, want CodeBadRequest", got)
 	}
@@ -150,7 +151,7 @@ func TestSubmit_Anonymous_AuthedPath_ReturnsBadRequest(t *testing.T) {
 func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
+	_, err := m.Submit(ctxRole("creator"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
 	if got := codeOf(t, err); got != ecode.CodeForbidden {
 		t.Fatalf("creator 鉴权作答 code = %d, want CodeForbidden(403)", got)
 	}
@@ -163,9 +164,9 @@ func TestSubmit_LoginRequired_Creator_ReturnsForbidden(t *testing.T) {
 func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if err != nil || len(res.ValidationErrors) > 0 {
-		t.Fatalf("respondent 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	_, err := m.Submit(ctxRole("respondent"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
+	if err != nil {
+		t.Fatalf("respondent 作答 login_required 应成功: err=%v", err)
 	}
 	if !f.saveCalled {
 		t.Fatal("应落库")
@@ -176,9 +177,9 @@ func TestSubmit_LoginRequired_Respondent_Succeeds(t *testing.T) {
 func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "login_required"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if err != nil || len(res.ValidationErrors) > 0 {
-		t.Fatalf("admin 作答 login_required 应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	_, err := m.Submit(ctxRole("admin"), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
+	if err != nil {
+		t.Fatalf("admin 作答 login_required 应成功: err=%v", err)
 	}
 	if !f.saveCalled {
 		t.Fatal("应落库")
@@ -189,12 +190,32 @@ func TestSubmit_LoginRequired_Admin_Succeeds(t *testing.T) {
 func TestSubmit_Anonymous_AnonPath_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(emptySchema)}
 	m := New(f)
-	res, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: domain.Answers{}})
-	if err != nil || len(res.ValidationErrors) > 0 {
-		t.Fatalf("匿名问卷匿名提交应成功: err=%v verrs=%v", err, res.ValidationErrors)
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
+	if err != nil {
+		t.Fatalf("匿名问卷匿名提交应成功: err=%v", err)
 	}
 	if !f.saveCalled {
 		t.Fatal("应落库")
+	}
+}
+
+// 校验失败:必答题缺答 → 返回 ecode.Validation(code=CodeValidation),携逐题明细 payload,不落库。
+// 收敛后校验错以 error 形式返回(原 SubmitResp.ValidationErrors 字段已移除)。
+func TestSubmit_ValidationFails_ReturnsValidationError(t *testing.T) {
+	// schema 含一道必答单选题;提交空答案 → 必答校验不过。
+	const requiredSchema = `{"id":"s1","type":"survey","title":"t","version":3,"questions":[{"id":"q1","type":"single","title":"Q1","required":true,"options":[{"id":"o1","label":"A"}]}],"rules":[]}`
+	f := &fakeStore{meta: dao.SurveyMeta{ID: "s1", Status: "live", AnswerAccess: "anonymous"}, publishedJSON: []byte(requiredSchema)}
+	m := New(f)
+	_, err := m.Submit(context.Background(), api.SubmitReq{SurveyID: "s1", Answers: api.Answers{}})
+	if got := codeOf(t, err); got != ecode.CodeValidation {
+		t.Fatalf("校验失败 code = %d, want CodeValidation", got)
+	}
+	payload, ok := ecode.DataFromError(err).(api.ValidationErrorsPayload)
+	if !ok || len(payload.Errors) == 0 {
+		t.Fatalf("应携带 ValidationErrorsPayload 明细, got %#v", ecode.DataFromError(err))
+	}
+	if f.saveCalled {
+		t.Fatal("校验失败不应落库")
 	}
 }
 

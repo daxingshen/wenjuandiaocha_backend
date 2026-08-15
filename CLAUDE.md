@@ -25,15 +25,16 @@ Go 1.25 · gin · sqlc + pgx/v5 · goose(迁移)· PostgreSQL 17 · bcrypt + DB-
 3. **永不信任客户端**:public 提交端点必须用后端载入的**发布版 schema** 完整重跑 Evaluate→Validate→Normalize;客户端传的隐藏题答案由后端求值剔除,落库规范化行以后端为准(frontend.md 决策 6 安全底线)。
 4. **必答判断双层**:multi-choice / matrix-single 的 required 判断在各自 handler 内(空数组/空对象在通用层算「已答」),不在通用 ValidateSurvey。照抄前端 handler 结构,别只在通用层判 required。
 5. **jsonb 整存 schema**:问卷整份 SurveySchema 存 `surveys.draft_schema` / `survey_versions.schema`(jsonb)。dao 层当 []byte 转发,不解析;只有 domain 在求值时解析。加题型零 DDL。
-6. **service I/O 一处定义、传输无关**:业务输入输出类型集中在 `api` 包(手写 Go,域前缀命名 `SurveyXReq`/`AuthXReq`/`SubmitReq` 等),各 service 的 `Service` 接口引用它作契约;传输层(现 http、未来 gRPC)只做「本传输格式 ↔ api 类型」翻译,**不得另立业务 I/O**。api 类型不带 json tag、零框架依赖(只 import context/time + domain)。**Req 只装客户端真实发送的东西**(请求体 + URL 路径参数);会话身份(userID)、会话 token、服务端采集的 ip/ua 等**传输派生值**统一走 `api.Metadata` + `ctx`(`api.WithMetadata`/`api.MetadataFrom`),由传输层注入、service 读取,不进 Req(对齐 gRPC metadata/拦截器语义)。**客户端网络信息(ip/ua)由全局 `clientInfo()` 中间件对每个请求采集一次**,`requireAuth` 等在其基础上**补充**身份/token(先 `MetadataFrom` 取现值再改字段,不覆盖 ip/ua)。无客户端入参的方法不带 Req(如 `List(ctx)`/`Me(ctx)`/`Logout(ctx)`)。HTTP 响应 struct 的 json tag(逐字节对齐前端)属传输层关切,留 server/http。schema 主体仍以 `[]byte` 穿过 service,不拆字段。
+6. **I/O 一处定义、api 即对外线格式**:业务输入输出类型集中在 `api` 包(手写 Go,域前缀命名 `SurveyXReq`/`AuthXReq`/`SubmitReq` 等),各 service 的 `Service` 接口引用它作契约;传输层(现 http、未来 gRPC)**不得另立请求/响应 struct**,直接以 api 类型收发。**api 类型带 json tag、即对外线格式**(逐字节对齐前端);URL 路径参数字段打 `json:"-"`,由 handler 从 `c.Param` 覆盖,不从 body 收。**api 包自包含**:只 import context/time/encoding/json(均标准库),**不引用 domain**(是最顶层协议层,手写 proto 的等价物);与 domain 同构的契约类型(如 `Answers`/`ValidationError`)在 api 自定义,service 边界按需转换。**成功/业务错的裁决收在 `render.JSON(c, data, err)`**:err==nil 出 `{code:0,data}`,err 出 `{code,message,data}`(data 取自 `ecode.Error` 携带的可选负载,如校验明细);handler 不再自行分派。**校验失败**由 service 返回 `ecode.Validation(payload)`,payload 走上述 data 通道。**非-200 前置拒绝**(bind 失败、限频、未登录)走 `render.Fail(c, status, msg)`,保留原生 HTTP 状态、不进信封。裸 schema 用 `json.RawMessage` 原样嵌入 data(不二次转义成 base64)。**Req 只装客户端真实发送的东西**(请求体 + URL 路径参数);会话身份(userID)、会话 token、服务端采集的 ip/ua 等**传输派生值**统一走 `metadata.Metadata` + `ctx`(`internal/lib/metadata` 包的 `metadata.With`/`metadata.From`),由传输层注入、service 读取,不进 Req(对齐 gRPC metadata/拦截器语义)。**客户端网络信息(ip/ua)由全局 `clientInfo()` 中间件对每个请求采集一次**,`RequireAuth` 等在其基础上**补充**身份/token(先 `metadata.From` 取现值再改字段,不覆盖 ip/ua)。无客户端入参的方法不带 Req(如 `List(ctx)`/`Me(ctx)`/`Logout(ctx)`)。schema 主体仍以 `json.RawMessage` 穿过 service,不拆字段。
+7. **RBAC 授权分两层、分处**:第一层**平台能力位**(role 能否做某类动作)由 HTTP 中间件 `middleware/auth` 的 `RequireAuth(svc, action)` 判定——`action` 非空则 `rbac.Can(role, action)` 不通过即真 403(`ecode.Forbidden403`,平台能力级越权);`action==""` 只鉴权不判能力位(如 `/auth/me`、作答能力由 service 按问卷模式另判的 submit 登录路由)。**路由表逐端点显式传 action = 端点权限清单**(可审计),不设组级保底,漏挂由端点级测试兜。鉴权+能力位**合并单构造器**(非两个中间件):能力位依赖 role、role 由本中间件注入,合并后先后固定、不会因注册次序写反。第二层**资源归属**(是不是本人的资源)在 service 的 `owned()`:查库比对 OwnerID,admin 短路,非 owner 返伪 404(`ecode.Forbidden()` 防枚举)。**能力位不散在 service**;归属不上移中间件(需查库、admin 短路、与业务共享 meta)。
 
 ## 仓库结构
 
 分层对齐 prompt_hub(见 wiki `PRD/backend-dir-restructure/`):依赖只从外向内 `server/http → service → dao → gen`,`service/dao → domain`,`di` 组装全部,`lib` 被各层用不反向依赖。
 
 ```
-api/              统一 I/O 契约:io.go(手写 Go 类型,域前缀 XReq/XResp)
-                  service 方法签名的入参/返回;SurveySchema 主体仍 []byte 透传,不带 json tag
+api/              统一 I/O 契约 = 对外线格式:io.go(手写 Go 类型,域前缀 XReq/XResp,带 json tag)
+                  service 方法签名的入参/返回;自包含(不 import domain);SurveySchema 主体 json.RawMessage 透传
 cmd/server/       main:config→pgxpool→di.InitServer(wire)→起服务
 cmd/seed/         seed 账号(读 .env)
 internal/

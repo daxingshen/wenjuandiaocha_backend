@@ -15,6 +15,7 @@ import (
 	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/id"
+	"wenjuandiaocha_backend/internal/lib/metadata"
 	"wenjuandiaocha_backend/internal/rbac"
 )
 
@@ -29,7 +30,7 @@ type Store interface {
 // I/O 契约集中在 api 包(一处定义,http/gRPC 两端共用)。
 
 // Service 是匿名作答提交业务契约。*Manager 实现它;传输层持本接口。
-// Submit 的防刷 meta(ip/ua)来自 ctx 的 api.Metadata,不进 Req。
+// Submit 的防刷 meta(ip/ua)来自 ctx 的 metadata.Metadata,不进 Req。
 type Service interface {
 	GetPublished(ctx context.Context, req api.GetPublishedReq) (api.GetPublishedResp, error)
 	Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error)
@@ -72,11 +73,11 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 }
 
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。
-// 校验失败通过 SubmitResp.ValidationErrors 返回(传输层据此回 400 + {errors}),error 仍为 nil。
+// 校验失败返回 ecode.Validation(携逐题明细 payload),由 render.JSON 渲染进信封 data:{errors:[...]}(恒200)。
 func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp, error) {
 	// 登录态由后端从 ctx 会话身份确认,不采信调用方声明:UserID 仅由 requireAuth 校验
 	// session 后注入(匿名 /public 路由无此中间件,UserID 恒空),故 UserID != "" ⟺ 已登录。
-	md := api.MetadataFrom(ctx)
+	md := metadata.From(ctx)
 	authenticated := md.UserID != ""
 
 	// 已登录路径:第一层能力位 —— 仅有作答能力的角色(respondent/admin)可提交;creator 被挡下(真 403)。
@@ -120,12 +121,19 @@ func (m *Manager) Submit(ctx context.Context, req api.SubmitReq) (api.SubmitResp
 		return api.SubmitResp{}, err
 	}
 
-	// 权威重跑:校验(隐藏题跳过)。
-	if errs := domain.ValidateSurvey(schema, req.Answers); len(errs) > 0 {
-		return api.SubmitResp{ValidationErrors: errs}, nil
+	// api.Answers 与 domain.Answers 同底层 map[string]any,边界处显式转换(api 不依赖 domain)。
+	answers := domain.Answers(req.Answers)
+	// 权威重跑:校验(隐藏题跳过)。失败 → ecode.Validation 携逐题明细,render 渲染进 data:{errors}。
+	if errs := domain.ValidateSurvey(schema, answers); len(errs) > 0 {
+		// domain.ValidationError → api.ValidationError 逐条转换(slice-of-struct 不能整体转)。
+		payload := api.ValidationErrorsPayload{Errors: make([]api.ValidationError, len(errs))}
+		for i, e := range errs {
+			payload.Errors[i] = api.ValidationError{QID: e.QID, Message: e.Message}
+		}
+		return api.SubmitResp{}, ecode.Validation(payload)
 	}
 	// 规范化:隐藏题不产行 —— 客户端多传的隐藏题答案在此被剔除。
-	rows := domain.NormalizeSurvey(schema, req.Answers)
+	rows := domain.NormalizeSurvey(schema, answers)
 
 	// raw 存客户端提交的 answers;落库规范化行以后端为准。
 	rawJSON, _ := json.Marshal(req.Answers)

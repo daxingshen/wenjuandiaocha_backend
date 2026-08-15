@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"wenjuandiaocha_backend/internal/domain"
+	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/ecode"
 )
 
@@ -23,8 +23,9 @@ func run(handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	return w
 }
 
-func TestSuccess_WrapsInEnvelope(t *testing.T) {
-	w := run(func(c *gin.Context) { Success(c, gin.H{"id": "a"}) })
+// JSON(err==nil) 成功负载包进信封。
+func TestJSON_SuccessWrapsInEnvelope(t *testing.T) {
+	w := run(func(c *gin.Context) { JSON(c, gin.H{"id": "a"}, nil) })
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -41,17 +42,18 @@ func TestSuccess_WrapsInEnvelope(t *testing.T) {
 	}
 }
 
-func TestSuccess_NilData(t *testing.T) {
-	w := run(func(c *gin.Context) { Success(c, nil) })
+// JSON(nil, nil) 占位成功 → data:null。
+func TestJSON_NilData(t *testing.T) {
+	w := run(func(c *gin.Context) { JSON(c, nil, nil) })
 	if w.Body.String() != `{"code":0,"message":"","data":null}` {
 		t.Fatalf("body = %s, want data:null", w.Body.String())
 	}
 }
 
-// 裸 schema 端点用 json.RawMessage 嵌入 data,原样输出不转义成字符串。
-func TestSuccess_RawMessageNotEscaped(t *testing.T) {
+// 裸 schema 端点用 json.RawMessage 作 data,原样输出不转义成字符串。
+func TestJSON_RawMessageNotEscaped(t *testing.T) {
 	schema := json.RawMessage(`{"id":"s1","title":"问卷"}`)
-	w := run(func(c *gin.Context) { Success(c, schema) })
+	w := run(func(c *gin.Context) { JSON(c, schema, nil) })
 	var got struct {
 		Data map[string]any `json:"data"`
 	}
@@ -63,8 +65,9 @@ func TestSuccess_RawMessageNotEscaped(t *testing.T) {
 	}
 }
 
-func TestError_MapsEcodeToEnvelope(t *testing.T) {
-	w := run(func(c *gin.Context) { Error(c, ecode.Conflict("仅进行中的问卷可结束")) })
+// JSON(err=ecode.Error) 映射业务码,恒 200,data:null。
+func TestJSON_EcodeErrorToEnvelope(t *testing.T) {
+	w := run(func(c *gin.Context) { JSON(c, nil, ecode.Conflict("仅进行中的问卷可结束")) })
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (business error stays 200)", w.Code)
 	}
@@ -79,8 +82,9 @@ func TestError_MapsEcodeToEnvelope(t *testing.T) {
 	}
 }
 
-func TestError_NonEcodeIsInternal(t *testing.T) {
-	w := run(func(c *gin.Context) { Error(c, errStub{}) })
+// JSON(err=非 ecode.Error) 归 CodeInternal。
+func TestJSON_NonEcodeIsInternal(t *testing.T) {
+	w := run(func(c *gin.Context) { JSON(c, nil, errStub{}) })
 	var got struct {
 		Code int `json:"code"`
 	}
@@ -94,16 +98,19 @@ type errStub struct{}
 
 func (errStub) Error() string { return "boom" }
 
-func TestValidation_ErrorsInData(t *testing.T) {
-	errs := []domain.ValidationError{{QID: "q1", Message: "必答"}}
-	w := run(func(c *gin.Context) { Validation(c, errs) })
+// JSON(err=ecode.Validation(payload)) 携带的 data 原样渲染进信封 → data:{errors:[...]}。
+// 校验错现以 error 形式经 JSON 统一分派(不再有独立 Validation 出口)。
+func TestJSON_ValidationErrorCarriesDataPayload(t *testing.T) {
+	errs := []api.ValidationError{{QID: "q1", Message: "必答"}}
+	verr := ecode.Validation(api.ValidationErrorsPayload{Errors: errs})
+	w := run(func(c *gin.Context) { JSON(c, nil, verr) })
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	var got struct {
 		Code int `json:"code"`
 		Data struct {
-			Errors []domain.ValidationError `json:"errors"`
+			Errors []api.ValidationError `json:"errors"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {

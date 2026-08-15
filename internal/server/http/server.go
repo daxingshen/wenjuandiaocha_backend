@@ -6,6 +6,7 @@ import (
 	"github.com/google/wire"
 
 	"wenjuandiaocha_backend/internal/config"
+	"wenjuandiaocha_backend/internal/rbac"
 	authmw "wenjuandiaocha_backend/internal/server/http/middleware/auth"
 	"wenjuandiaocha_backend/internal/server/http/middleware/clientinfo"
 	"wenjuandiaocha_backend/internal/server/http/middleware/cors"
@@ -41,8 +42,10 @@ func (s *Server) Router() *gin.Engine {
 	_ = r.SetTrustedProxies(nil)
 	r.Use(requestid.New(), recovery.New(), logger.New(), cors.New(), clientinfo.New())
 
-	// requireAuth 构造一次复用(依赖注入 auth service)。
-	requireAuth := authmw.RequireAuth(s.auth)
+	// auth 中间件按端点所需能力位逐路由构造:RequireAuth(svc, action)。
+	// action=="" 只鉴权不判能力位(/auth/me、需登录但作答能力由 service 按问卷模式另判的 submit)。
+	// 逐路由显式传 action = 路由表即「端点 → 所需能力」清单(可审计);不设组级保底,漏挂由端点级测试兜。
+	reqAuth := func(action rbac.Action) gin.HandlerFunc { return authmw.RequireAuth(s.auth, action) }
 
 	root := r.Group("/api")
 
@@ -58,24 +61,24 @@ func (s *Server) Router() *gin.Engine {
 	{
 		a.POST("/login", s.login)
 		a.POST("/logout", s.logout)
-		a.GET("/me", requireAuth, s.me)
+		a.GET("/me", reqAuth(""), s.me) // 只需登录,能力位无关
 	}
 
-	// studio:需登录。问卷 CRUD + 发布。
-	sv := root.Group("/surveys", requireAuth)
+	// studio:需登录 + RBAC 第一层能力位(第二层归属在 service)。
+	sv := root.Group("/surveys")
 	{
-		sv.GET("", s.listSurveys)
-		sv.POST("", s.createSurvey)
-		sv.GET("/:id", s.getSurvey)
-		sv.PUT("/:id", s.updateSurvey)
-		sv.PATCH("/:id/answer-access", s.setAnswerAccess)
-		sv.POST("/:id/publish", s.publishSurvey)
-		sv.POST("/:id/close", s.closeSurvey)
-		sv.POST("/:id/reopen", s.reopenSurvey)
-		sv.GET("/:id/stats", s.surveyStats)
-		// 需登录作答(login_required 问卷):过 requireAuth + 作答能力位(respondent/admin)。
-		// 与匿名 /public 提交并存;anonymous 问卷仍走 /public。
-		sv.POST("/:id/answers", s.submitAnswersAuthed)
+		sv.GET("", reqAuth(rbac.ActionSurveyList), s.listSurveys)                          // admin 全站/creator 本人范围在 service
+		sv.POST("", reqAuth(rbac.ActionSurveyCreate), s.createSurvey)                      //
+		sv.GET("/:id", reqAuth(rbac.ActionSurveyRead), s.getSurvey)                        //
+		sv.PUT("/:id", reqAuth(rbac.ActionSurveyUpdate), s.updateSurvey)                   //
+		sv.PATCH("/:id/answer-access", reqAuth(rbac.ActionSurveyUpdate), s.setAnswerAccess) // 设作答模式 = 改草稿,复用 Update 能力位
+		sv.POST("/:id/publish", reqAuth(rbac.ActionSurveyPublish), s.publishSurvey)        //
+		sv.POST("/:id/close", reqAuth(rbac.ActionSurveyClose), s.closeSurvey)              //
+		sv.POST("/:id/reopen", reqAuth(rbac.ActionSurveyReopen), s.reopenSurvey)           //
+		sv.GET("/:id/stats", reqAuth(rbac.ActionSurveyStats), s.surveyStats)               //
+		// 需登录作答(login_required 问卷):action="" 只鉴权;作答能力位与问卷模式(anonymous/
+		// login_required)+ 匿名/登录路径耦合,需查问卷,由 submission service 判(非纯能力位)。
+		sv.POST("/:id/answers", reqAuth(""), s.submitAnswersAuthed)
 	}
 
 	return r
