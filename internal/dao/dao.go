@@ -50,7 +50,7 @@ func (s *Store) SaveSubmission(ctx context.Context, respID, surveyID string, ver
 
 	q := s.q.WithTx(tx)
 	if err := q.InsertResponse(ctx, gen.InsertResponseParams{
-		ID: respID, SurveyID: surveyID, SurveyVersion: int32(version), Raw: raw, Meta: meta,
+		ResponseID: respID, SurveyID: surveyID, SurveyVersion: int32(version), Raw: raw, Meta: meta,
 	}); err != nil {
 		return fmt.Errorf("insert response: %w", err)
 	}
@@ -127,7 +127,7 @@ func (s *Store) Publish(ctx context.Context, surveyID string, draftSchema []byte
 		return 0, false, fmt.Errorf("insert version: %w", err)
 	}
 	if err := q.SetPublished(ctx, gen.SetPublishedParams{
-		ID: surveyID, PublishedVersion: ptrInt32(int32(next)),
+		SurveyID: surveyID, PublishedVersion: ptrInt32(int32(next)),
 	}); err != nil {
 		return 0, false, fmt.Errorf("set published: %w", err)
 	}

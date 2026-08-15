@@ -147,7 +147,7 @@ func (m *Manager) List(ctx context.Context, req api.SurveyListReq) (api.SurveyLi
 	items := make([]api.SurveyListItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, api.SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status,
+			ID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status,
 			UpdatedAt: r.UpdatedAt.Format(time.RFC3339), // 对外 RFC3339 字符串(前端契约)
 		})
 	}
@@ -223,7 +223,7 @@ func (m *Manager) Update(ctx context.Context, req api.SurveyUpdateReq) (api.Surv
 	if err := json.Unmarshal(req.Body, &schema); err != nil {
 		return api.SurveyUpdateResp{}, ecode.BadRequest("schema 格式错误")
 	}
-	if err := m.store.UpdateDraft(ctx, meta.ID, schema.Title, string(schema.Type), req.Body); err != nil {
+	if err := m.store.UpdateDraft(ctx, meta.SurveyID, schema.Title, string(schema.Type), req.Body); err != nil {
 		return api.SurveyUpdateResp{}, err
 	}
 	return api.SurveyUpdateResp{}, nil
@@ -236,7 +236,7 @@ func (m *Manager) Publish(ctx context.Context, req api.SurveyPublishReq) (api.Su
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
-	version, unchanged, err := m.store.Publish(ctx, meta.ID, meta.DraftSchema)
+	version, unchanged, err := m.store.Publish(ctx, meta.SurveyID, meta.DraftSchema)
 	if err != nil {
 		return api.SurveyPublishResp{}, err
 	}
@@ -257,7 +257,7 @@ func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAc
 	if meta.Status != domain.StatusDraft {
 		return api.SurveySetAnswerAccessResp{}, ecode.Conflict(msgEditForbidden)
 	}
-	if err := m.store.SetAnswerAccess(ctx, meta.ID, req.AnswerAccess); err != nil {
+	if err := m.store.SetAnswerAccess(ctx, meta.SurveyID, req.AnswerAccess); err != nil {
 		return api.SurveySetAnswerAccessResp{}, err
 	}
 	return api.SurveySetAnswerAccessResp{}, nil
@@ -272,7 +272,7 @@ func (m *Manager) Close(ctx context.Context, req api.SurveyCloseReq) (api.Survey
 	if meta.Status != domain.StatusLive {
 		return api.SurveyCloseResp{}, ecode.Conflict(msgCloseNotLive)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusClosed); err != nil {
+	if err := m.store.SetStatus(ctx, meta.SurveyID, domain.StatusClosed); err != nil {
 		return api.SurveyCloseResp{}, err
 	}
 	return api.SurveyCloseResp{}, nil
@@ -287,7 +287,7 @@ func (m *Manager) Reopen(ctx context.Context, req api.SurveyReopenReq) (api.Surv
 	if meta.Status != domain.StatusClosed || meta.PublishedVersion == nil {
 		return api.SurveyReopenResp{}, ecode.Conflict(msgReopenInvalid)
 	}
-	if err := m.store.SetStatus(ctx, meta.ID, domain.StatusLive); err != nil {
+	if err := m.store.SetStatus(ctx, meta.SurveyID, domain.StatusLive); err != nil {
 		return api.SurveyReopenResp{}, err
 	}
 	return api.SurveyReopenResp{}, nil
@@ -299,7 +299,7 @@ func (m *Manager) Stats(ctx context.Context, req api.SurveyStatsReq) (api.Survey
 	if err != nil {
 		return api.SurveyStatsResp{}, err
 	}
-	count, err := m.store.CountResponses(ctx, meta.ID)
+	count, err := m.store.CountResponses(ctx, meta.SurveyID)
 	if err != nil {
 		return api.SurveyStatsResp{}, err
 	}

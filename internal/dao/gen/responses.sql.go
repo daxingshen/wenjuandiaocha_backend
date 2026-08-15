@@ -49,12 +49,12 @@ func (q *Queries) InsertAnswerRow(ctx context.Context, arg InsertAnswerRowParams
 }
 
 const insertResponse = `-- name: InsertResponse :exec
-INSERT INTO responses (id, survey_id, survey_version, raw, meta)
+INSERT INTO responses (response_id, survey_id, survey_version, raw, meta)
 VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertResponseParams struct {
-	ID            string
+	ResponseID    string
 	SurveyID      string
 	SurveyVersion int32
 	Raw           []byte
@@ -63,7 +63,7 @@ type InsertResponseParams struct {
 
 func (q *Queries) InsertResponse(ctx context.Context, arg InsertResponseParams) error {
 	_, err := q.db.Exec(ctx, insertResponse,
-		arg.ID,
+		arg.ResponseID,
 		arg.SurveyID,
 		arg.SurveyVersion,
 		arg.Raw,

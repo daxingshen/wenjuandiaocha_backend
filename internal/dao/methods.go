@@ -12,7 +12,7 @@ import (
 // ---------- 用户 ----------
 
 type User struct {
-	ID           string
+	UserID       string // 业务键
 	Account      string
 	PasswordHash string
 	Name         string
@@ -21,7 +21,7 @@ type User struct {
 
 func (s *Store) CreateUser(ctx context.Context, u User) error {
 	return s.q.CreateUser(ctx, gen.CreateUserParams{
-		ID: u.ID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Role: u.Role,
+		UserID: u.UserID, Account: u.Account, PasswordHash: u.PasswordHash, Name: u.Name, Role: u.Role,
 	})
 }
 
@@ -30,15 +30,15 @@ func (s *Store) GetUserByAccount(ctx context.Context, account string) (User, err
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
+	return User{UserID: r.UserID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
 }
 
-func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
-	r, err := s.q.GetUserByID(ctx, id)
+func (s *Store) GetUserByID(ctx context.Context, userID string) (User, error) {
+	r, err := s.q.GetUserByID(ctx, userID)
 	if err != nil {
 		return User{}, notFound(err)
 	}
-	return User{ID: r.ID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
+	return User{UserID: r.UserID, Account: r.Account, PasswordHash: r.PasswordHash, Name: r.Name, Role: r.Role}, nil
 }
 
 // ---------- 会话 ----------
@@ -66,7 +66,7 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 // ---------- 问卷 CRUD ----------
 
 type SurveyMeta struct {
-	ID               string
+	SurveyID         string // 业务键
 	OwnerID          string
 	Type             string
 	Title            string
@@ -76,26 +76,26 @@ type SurveyMeta struct {
 	AnswerAccess     string // anonymous|login_required:谁能作答(发布时设定,D6)
 }
 
-func (s *Store) CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error {
+func (s *Store) CreateSurvey(ctx context.Context, surveyID, ownerID, typ, title string, draftSchema []byte, answerAccess string) error {
 	return s.q.CreateSurvey(ctx, gen.CreateSurveyParams{
-		ID: id, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess,
+		SurveyID: surveyID, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess,
 	})
 }
 
-func (s *Store) GetSurvey(ctx context.Context, id string) (SurveyMeta, error) {
-	r, err := s.q.GetSurvey(ctx, id)
+func (s *Store) GetSurvey(ctx context.Context, surveyID string) (SurveyMeta, error) {
+	r, err := s.q.GetSurvey(ctx, surveyID)
 	if err != nil {
 		return SurveyMeta{}, notFound(err)
 	}
 	return SurveyMeta{
-		ID: r.ID, OwnerID: r.OwnerID, Type: r.Type, Title: r.Title, Status: r.Status,
+		SurveyID: r.SurveyID, OwnerID: r.OwnerID, Type: r.Type, Title: r.Title, Status: r.Status,
 		DraftSchema: r.DraftSchema, PublishedVersion: r.PublishedVersion, AnswerAccess: r.AnswerAccess,
 	}, nil
 }
 
 // SurveyListItem 列表项(轻量,对齐前端 SurveyListItem)。
 type SurveyListItem struct {
-	ID        string
+	SurveyID  string // 业务键
 	Title     string
 	Type      string
 	Status    string
@@ -130,7 +130,7 @@ func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string, p Survey
 	for _, r := range rows {
 		total = r.Total
 		out = append(out, SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
+			SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
 		})
 	}
 	return out, total, nil
@@ -153,33 +153,33 @@ func (s *Store) ListAllSurveys(ctx context.Context, p SurveyListParams) ([]Surve
 	for _, r := range rows {
 		total = r.Total
 		out = append(out, SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
+			SurveyID: r.SurveyID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
 		})
 	}
 	return out, total, nil
 }
 
-func (s *Store) UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error {
+func (s *Store) UpdateDraft(ctx context.Context, surveyID, title, typ string, draftSchema []byte) error {
 	return s.q.UpdateDraft(ctx, gen.UpdateDraftParams{
-		ID: id, DraftSchema: draftSchema, Title: title, Type: typ,
+		SurveyID: surveyID, DraftSchema: draftSchema, Title: title, Type: typ,
 	})
 }
 
 // SetStatus 只改 status 单列(生命周期状态机:close/reopen 用)。
 // 不校验合法性——状态机守卫在 http 层(据 SurveyMeta.Status/PublishedVersion 判断)。
-func (s *Store) SetStatus(ctx context.Context, id, status string) error {
-	return s.q.SetStatus(ctx, gen.SetStatusParams{ID: id, Status: status})
+func (s *Store) SetStatus(ctx context.Context, surveyID, status string) error {
+	return s.q.SetStatus(ctx, gen.SetStatusParams{SurveyID: surveyID, Status: status})
 }
 
 // SetAnswerAccess 只改 answer_access 单列(作答访问模式)。
 // 不校验状态/归属——「仅 draft + owner」守卫在 service 层(复用 owned() + 状态判断)。
-func (s *Store) SetAnswerAccess(ctx context.Context, id, access string) error {
-	return s.q.SetAnswerAccess(ctx, gen.SetAnswerAccessParams{ID: id, AnswerAccess: access})
+func (s *Store) SetAnswerAccess(ctx context.Context, surveyID, access string) error {
+	return s.q.SetAnswerAccess(ctx, gen.SetAnswerAccessParams{SurveyID: surveyID, AnswerAccess: access})
 }
 
 // GetPublishedSchema 取已发布快照的 schema jsonb;未发布/非 live 返回 ErrNotFound。
-func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, error) {
-	b, err := s.q.GetPublishedSchema(ctx, id)
+func (s *Store) GetPublishedSchema(ctx context.Context, surveyID string) ([]byte, error) {
+	b, err := s.q.GetPublishedSchema(ctx, surveyID)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -188,8 +188,8 @@ func (s *Store) GetPublishedSchema(ctx context.Context, id string) ([]byte, erro
 
 // GetVersionSchema 按显式版本号取历史发布快照(版本锚定提交)。该版不存在返回 ErrNotFound。
 // 不做 status 过滤——status(live 才收)由 http 层单独判定。
-func (s *Store) GetVersionSchema(ctx context.Context, id string, version int32) ([]byte, error) {
-	b, err := s.q.GetVersionSchema(ctx, gen.GetVersionSchemaParams{SurveyID: id, Version: version})
+func (s *Store) GetVersionSchema(ctx context.Context, surveyID string, version int32) ([]byte, error) {
+	b, err := s.q.GetVersionSchema(ctx, gen.GetVersionSchemaParams{SurveyID: surveyID, Version: version})
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -197,6 +197,6 @@ func (s *Store) GetVersionSchema(ctx context.Context, id string, version int32) 
 }
 
 // CountResponses 统计某问卷的答卷数(COUNT :one 恒返回一行,无 no-rows,直接透传 err)。
-func (s *Store) CountResponses(ctx context.Context, id string) (int32, error) {
-	return s.q.CountResponses(ctx, id)
+func (s *Store) CountResponses(ctx context.Context, surveyID string) (int32, error) {
+	return s.q.CountResponses(ctx, surveyID)
 }

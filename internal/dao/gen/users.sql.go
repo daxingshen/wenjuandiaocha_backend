@@ -7,15 +7,17 @@ package gen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO users (id, account, password_hash, name, role)
+INSERT INTO users (user_id, account, password_hash, name, role)
 VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateUserParams struct {
-	ID           string
+	UserID       string
 	Account      string
 	PasswordHash string
 	Name         string
@@ -24,7 +26,7 @@ type CreateUserParams struct {
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	_, err := q.db.Exec(ctx, createUser,
-		arg.ID,
+		arg.UserID,
 		arg.Account,
 		arg.PasswordHash,
 		arg.Name,
@@ -34,15 +36,24 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 }
 
 const getUserByAccount = `-- name: GetUserByAccount :one
-SELECT id, account, password_hash, name, role, created_at
+SELECT user_id, account, password_hash, name, role, created_at
 FROM users WHERE account = $1
 `
 
-func (q *Queries) GetUserByAccount(ctx context.Context, account string) (User, error) {
+type GetUserByAccountRow struct {
+	UserID       string
+	Account      string
+	PasswordHash string
+	Name         string
+	Role         string
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetUserByAccount(ctx context.Context, account string) (GetUserByAccountRow, error) {
 	row := q.db.QueryRow(ctx, getUserByAccount, account)
-	var i User
+	var i GetUserByAccountRow
 	err := row.Scan(
-		&i.ID,
+		&i.UserID,
 		&i.Account,
 		&i.PasswordHash,
 		&i.Name,
@@ -53,15 +64,24 @@ func (q *Queries) GetUserByAccount(ctx context.Context, account string) (User, e
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, account, password_hash, name, role, created_at
-FROM users WHERE id = $1
+SELECT user_id, account, password_hash, name, role, created_at
+FROM users WHERE user_id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i User
+type GetUserByIDRow struct {
+	UserID       string
+	Account      string
+	PasswordHash string
+	Name         string
+	Role         string
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, userID string) (GetUserByIDRow, error) {
+	row := q.db.QueryRow(ctx, getUserByID, userID)
+	var i GetUserByIDRow
 	err := row.Scan(
-		&i.ID,
+		&i.UserID,
 		&i.Account,
 		&i.PasswordHash,
 		&i.Name,

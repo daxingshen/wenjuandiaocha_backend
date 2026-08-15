@@ -48,7 +48,7 @@ func (q *Queries) DeleteSession(ctx context.Context, token string) error {
 const getSession = `-- name: GetSession :one
 SELECT s.token, s.user_id, s.expires_at, s.created_at, u.role
 FROM sessions s
-JOIN users u ON u.id = s.user_id
+JOIN users u ON u.user_id = s.user_id
 WHERE s.token = $1
 `
 
