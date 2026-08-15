@@ -11,26 +11,42 @@ FROM surveys WHERE survey_id = $1;
 -- name: ListSurveysByOwner :many
 -- creator 本人列表。offset 分页:ORDER BY created_at DESC, id DESC(id=代理键,单调,兜底稳定序)。
 -- 投影业务键 survey_id(对外身份);过滤参数为空(nil)时短路不生效。
--- COUNT(*) OVER() 返回筛选后总行数(LIMIT 前计数),供前端算总页数。
-SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
+-- 总行数由 CountSurveysByOwner 单独取(不用 COUNT(*) OVER():越界页返回空集会丢计数报 0)。
+-- keyword 走 ILIKE + ESCAPE '\':调用方须先转义 % _ \(否则用户输入的通配符会改变匹配语义)。
+SELECT survey_id, title, type, status, updated_at
 FROM surveys
 WHERE owner_id = $1
-  AND (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%')
+  AND (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%' ESCAPE '\')
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
+-- name: CountSurveysByOwner :one
+-- ListSurveysByOwner 的筛选后总行数(WHERE 必须与 List 逐字一致,否则计数与页内不匹配)。
+SELECT COUNT(*) FROM surveys
+WHERE owner_id = $1
+  AND (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%' ESCAPE '\')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'));
+
 -- name: ListAllSurveys :many
 -- admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
--- 过滤/分页语义同 ListSurveysByOwner。
-SELECT survey_id, title, type, status, updated_at, COUNT(*) OVER() AS total
+-- 过滤/分页语义同 ListSurveysByOwner;总行数由 CountAllSurveys 单独取。
+SELECT survey_id, title, type, status, updated_at
 FROM surveys
-WHERE (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%')
+WHERE (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%' ESCAPE '\')
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
+
+-- name: CountAllSurveys :one
+-- ListAllSurveys 的筛选后总行数(WHERE 必须与 List 逐字一致)。
+SELECT COUNT(*) FROM surveys
+WHERE (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%' ESCAPE '\')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'));
 
 -- name: UpdateDraft :exec
 UPDATE surveys
