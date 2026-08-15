@@ -113,10 +113,22 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) er
 }
 
 const listAllSurveys = `-- name: ListAllSurveys :many
-SELECT id, title, type, status, updated_at
+SELECT id, title, type, status, updated_at, COUNT(*) OVER() AS total
 FROM surveys
-ORDER BY created_at DESC
+WHERE ($1::text IS NULL OR title ILIKE '%' || $1 || '%')
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR type = $3)
+ORDER BY created_at DESC, id DESC
+LIMIT $5 OFFSET $4
 `
+
+type ListAllSurveysParams struct {
+	Keyword *string
+	Status  *string
+	Type    *string
+	Off     int32
+	Lim     int32
+}
 
 type ListAllSurveysRow struct {
 	ID        string
@@ -124,11 +136,19 @@ type ListAllSurveysRow struct {
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
+	Total     int64
 }
 
 // admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
-func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, error) {
-	rows, err := q.db.Query(ctx, listAllSurveys)
+// 过滤/分页语义同 ListSurveysByOwner。
+func (q *Queries) ListAllSurveys(ctx context.Context, arg ListAllSurveysParams) ([]ListAllSurveysRow, error) {
+	rows, err := q.db.Query(ctx, listAllSurveys,
+		arg.Keyword,
+		arg.Status,
+		arg.Type,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +162,7 @@ func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, erro
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}
@@ -154,10 +175,24 @@ func (q *Queries) ListAllSurveys(ctx context.Context) ([]ListAllSurveysRow, erro
 }
 
 const listSurveysByOwner = `-- name: ListSurveysByOwner :many
-SELECT id, title, type, status, updated_at
-FROM surveys WHERE owner_id = $1
-ORDER BY created_at DESC
+SELECT id, title, type, status, updated_at, COUNT(*) OVER() AS total
+FROM surveys
+WHERE owner_id = $1
+  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%')
+  AND ($3::text IS NULL OR status = $3)
+  AND ($4::text IS NULL OR type = $4)
+ORDER BY created_at DESC, id DESC
+LIMIT $6 OFFSET $5
 `
+
+type ListSurveysByOwnerParams struct {
+	OwnerID string
+	Keyword *string
+	Status  *string
+	Type    *string
+	Off     int32
+	Lim     int32
+}
 
 type ListSurveysByOwnerRow struct {
 	ID        string
@@ -165,10 +200,20 @@ type ListSurveysByOwnerRow struct {
 	Type      string
 	Status    string
 	UpdatedAt pgtype.Timestamptz
+	Total     int64
 }
 
-func (q *Queries) ListSurveysByOwner(ctx context.Context, ownerID string) ([]ListSurveysByOwnerRow, error) {
-	rows, err := q.db.Query(ctx, listSurveysByOwner, ownerID)
+// creator 本人列表。offset 分页:ORDER BY created_at DESC, id DESC(id 兜底稳定序)。
+// 过滤参数为空(nil)时短路不生效。COUNT(*) OVER() 返回筛选后总行数(LIMIT 前计数),供前端算总页数。
+func (q *Queries) ListSurveysByOwner(ctx context.Context, arg ListSurveysByOwnerParams) ([]ListSurveysByOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listSurveysByOwner,
+		arg.OwnerID,
+		arg.Keyword,
+		arg.Status,
+		arg.Type,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +227,7 @@ func (q *Queries) ListSurveysByOwner(ctx context.Context, ownerID string) ([]Lis
 			&i.Type,
 			&i.Status,
 			&i.UpdatedAt,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}

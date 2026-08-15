@@ -102,33 +102,61 @@ type SurveyListItem struct {
 	UpdatedAt time.Time
 }
 
-func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string) ([]SurveyListItem, error) {
-	rows, err := s.q.ListSurveysByOwner(ctx, ownerID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]SurveyListItem, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, SurveyListItem{
-			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
-		})
-	}
-	return out, nil
+// SurveyListParams 列表查询参数(过滤 + offset 分页)。
+// 指针字段为 nil 即该条件不生效(SQL 侧 narg 短路)。Limit/Offset 由 service 计算并 clamp。
+type SurveyListParams struct {
+	Keyword *string
+	Status  *string
+	Type    *string
+	Limit   int32
+	Offset  int32
 }
 
-// ListAllSurveys 列出全站问卷(admin 全站视角,不限 owner)。
-func (s *Store) ListAllSurveys(ctx context.Context) ([]SurveyListItem, error) {
-	rows, err := s.q.ListAllSurveys(ctx)
+// 两个 List 方法返回 (页内项, 筛选后总行数, error)。total 来自 COUNT(*) OVER()(首行取,空集为 0)。
+func (s *Store) ListSurveysByOwner(ctx context.Context, ownerID string, p SurveyListParams) ([]SurveyListItem, int64, error) {
+	rows, err := s.q.ListSurveysByOwner(ctx, gen.ListSurveysByOwnerParams{
+		OwnerID: ownerID,
+		Keyword: p.Keyword,
+		Status:  p.Status,
+		Type:    p.Type,
+		Lim:     p.Limit,
+		Off:     p.Offset,
+	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]SurveyListItem, 0, len(rows))
+	var total int64
 	for _, r := range rows {
+		total = r.Total
 		out = append(out, SurveyListItem{
 			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
 		})
 	}
-	return out, nil
+	return out, total, nil
+}
+
+// ListAllSurveys 列出全站问卷(admin 全站视角,不限 owner)。过滤/分页语义同 ByOwner。
+func (s *Store) ListAllSurveys(ctx context.Context, p SurveyListParams) ([]SurveyListItem, int64, error) {
+	rows, err := s.q.ListAllSurveys(ctx, gen.ListAllSurveysParams{
+		Keyword: p.Keyword,
+		Status:  p.Status,
+		Type:    p.Type,
+		Lim:     p.Limit,
+		Off:     p.Offset,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]SurveyListItem, 0, len(rows))
+	var total int64
+	for _, r := range rows {
+		total = r.Total
+		out = append(out, SurveyListItem{
+			ID: r.ID, Title: r.Title, Type: r.Type, Status: r.Status, UpdatedAt: r.UpdatedAt.Time,
+		})
+	}
+	return out, total, nil
 }
 
 func (s *Store) UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error {

@@ -21,8 +21,11 @@ type fakeStore struct {
 	createdAccess   string // 记录 CreateSurvey 实际写入的作答模式(新建默认)
 	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
 	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
-	listOwner       string // 记录 ListSurveysByOwner 收到的 ownerID
-	listAllCalled   bool   // 记录是否走了全站列表(admin)
+	listOwner       string  // 记录 ListSurveysByOwner 收到的 ownerID
+	listAllCalled   bool    // 记录是否走了全站列表(admin)
+	listKeyword     *string              // 记录两条列表分支收到的 keyword(nil=不过滤)
+	listParams      dao.SurveyListParams // 记录列表分支收到的完整参数(limit/offset/status/type 断言用)
+	listTotal       int64                // fake 返回的总行数(COUNT(*) OVER())
 	ownerItems      []dao.SurveyListItem
 	allItems        []dao.SurveyListItem
 }
@@ -30,13 +33,17 @@ type fakeStore struct {
 func (f *fakeStore) GetSurvey(_ context.Context, _ string) (dao.SurveyMeta, error) {
 	return f.meta, f.getErr
 }
-func (f *fakeStore) ListSurveysByOwner(_ context.Context, ownerID string) ([]dao.SurveyListItem, error) {
+func (f *fakeStore) ListSurveysByOwner(_ context.Context, ownerID string, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error) {
 	f.listOwner = ownerID
-	return f.ownerItems, nil
+	f.listKeyword = p.Keyword
+	f.listParams = p
+	return f.ownerItems, f.listTotal, nil
 }
-func (f *fakeStore) ListAllSurveys(_ context.Context) ([]dao.SurveyListItem, error) {
+func (f *fakeStore) ListAllSurveys(_ context.Context, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error) {
 	f.listAllCalled = true
-	return f.allItems, nil
+	f.listKeyword = p.Keyword
+	f.listParams = p
+	return f.allItems, f.listTotal, nil
 }
 func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess string) error {
 	f.createdAccess = answerAccess
@@ -264,7 +271,7 @@ func TestUpdate_Admin_CrossOwner_Writes(t *testing.T) {
 // List:admin → 走全站列表;creator → 走本人列表。
 func TestList_RoleScopes(t *testing.T) {
 	fa := &fakeStore{allItems: []dao.SurveyListItem{{ID: "x"}}}
-	if _, err := New(fa).List(ctxRole("admin-user", "admin")); err != nil {
+	if _, err := New(fa).List(ctxRole("admin-user", "admin"), api.SurveyListReq{}); err != nil {
 		t.Fatalf("admin List 应成功,得到 %v", err)
 	}
 	if !fa.listAllCalled {
@@ -272,11 +279,134 @@ func TestList_RoleScopes(t *testing.T) {
 	}
 
 	fc := &fakeStore{ownerItems: []dao.SurveyListItem{{ID: "y"}}}
-	if _, err := New(fc).List(ctxRole("alice", "creator")); err != nil {
+	if _, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{}); err != nil {
 		t.Fatalf("creator List 应成功,得到 %v", err)
 	}
 	if fc.listAllCalled || fc.listOwner != "alice" {
 		t.Fatalf("creator List 应按本人过滤(listOwner=%q, listAll=%v)", fc.listOwner, fc.listAllCalled)
+	}
+}
+
+// List 搜索:空 Q 不过滤(keyword=nil);非空 Q 去空格后透传两条分支;纯空格视同空。
+func TestList_KeywordPassthrough(t *testing.T) {
+	// 空 Q → keyword 应为 nil(不过滤),admin/creator 两条分支都验。
+	for _, role := range []string{"admin", "creator"} {
+		f := &fakeStore{}
+		if _, err := New(f).List(ctxRole("u", role), api.SurveyListReq{Q: "  "}); err != nil {
+			t.Fatalf("%s List 空 Q 应成功,得到 %v", role, err)
+		}
+		if f.listKeyword != nil {
+			t.Fatalf("%s List 空/空格 Q 应 keyword=nil(不过滤),得到 %q", role, *f.listKeyword)
+		}
+	}
+
+	// 非空 Q → 去首尾空格后透传。creator 分支。
+	fc := &fakeStore{}
+	if _, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Q: "  满意度  "}); err != nil {
+		t.Fatalf("creator List 应成功,得到 %v", err)
+	}
+	if fc.listKeyword == nil || *fc.listKeyword != "满意度" {
+		t.Fatalf("creator List keyword 应为去空格后的 %q,得到 %v", "满意度", fc.listKeyword)
+	}
+
+	// 非空 Q → admin 全站分支也应收到 keyword。
+	fa := &fakeStore{}
+	if _, err := New(fa).List(ctxRole("admin-user", "admin"), api.SurveyListReq{Q: "问卷"}); err != nil {
+		t.Fatalf("admin List 应成功,得到 %v", err)
+	}
+	if !fa.listAllCalled || fa.listKeyword == nil || *fa.listKeyword != "问卷" {
+		t.Fatalf("admin List 应走全站且 keyword=%q,得到 listAll=%v keyword=%v", "问卷", fa.listAllCalled, fa.listKeyword)
+	}
+}
+
+// makeItems 造 n 条列表项(id 唯一),供分页断言。
+func makeItems(n int) []dao.SurveyListItem {
+	out := make([]dao.SurveyListItem, n)
+	for i := 0; i < n; i++ {
+		out[i] = dao.SurveyListItem{ID: string(rune('a' + i)), Title: "t", Type: "survey", Status: "draft"}
+	}
+	return out
+}
+
+// List 默认页大小 10:store 收到 limit=10 offset=0;status/type 透传。
+func TestList_DefaultPageSizeAndFilters(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(3), listTotal: 3}
+	_, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Status: "live", Type: "survey"})
+	if err != nil {
+		t.Fatalf("List 应成功,得到 %v", err)
+	}
+	if fc.listParams.Limit != defaultPageSize || fc.listParams.Offset != 0 {
+		t.Fatalf("默认应 limit=%d offset=0,得到 limit=%d offset=%d", defaultPageSize, fc.listParams.Limit, fc.listParams.Offset)
+	}
+	if fc.listParams.Status == nil || *fc.listParams.Status != "live" {
+		t.Fatalf("status 应透传 live,得到 %v", fc.listParams.Status)
+	}
+	if fc.listParams.Type == nil || *fc.listParams.Type != "survey" {
+		t.Fatalf("type 应透传 survey,得到 %v", fc.listParams.Type)
+	}
+}
+
+// List limit clamp:超上限落 maxPageSize;非正数落默认。
+func TestList_LimitClamp(t *testing.T) {
+	fc := &fakeStore{}
+	_, _ = New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 99999})
+	if fc.listParams.Limit != maxPageSize {
+		t.Fatalf("超上限 limit 应 clamp 到 %d,得到 %d", maxPageSize, fc.listParams.Limit)
+	}
+
+	fc2 := &fakeStore{}
+	_, _ = New(fc2).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: -5})
+	if fc2.listParams.Limit != defaultPageSize {
+		t.Fatalf("非正 limit 应落默认 %d,得到 %d", defaultPageSize, fc2.listParams.Limit)
+	}
+}
+
+// List page→offset:offset=(page-1)*limit;page<1 落 1(offset=0)。
+func TestList_PageOffset(t *testing.T) {
+	fc := &fakeStore{}
+	_, _ = New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 20, Page: 3})
+	if fc.listParams.Offset != 40 || fc.listParams.Limit != 20 {
+		t.Fatalf("page3 size20 应 offset=40 limit=20,得到 offset=%d limit=%d", fc.listParams.Offset, fc.listParams.Limit)
+	}
+
+	fc2 := &fakeStore{}
+	_, _ = New(fc2).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 20, Page: 0})
+	if fc2.listParams.Offset != 0 {
+		t.Fatalf("page<1 应落第一页 offset=0,得到 %d", fc2.listParams.Offset)
+	}
+}
+
+// List total 透传:store 返回的 COUNT(*) OVER() 总数原样出现在响应,供前端算总页数。
+func TestList_TotalPassthrough(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(2), listTotal: 57}
+	resp, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{Limit: 2, Page: 1})
+	if err != nil {
+		t.Fatalf("List 应成功,得到 %v", err)
+	}
+	if resp.Total != 57 {
+		t.Fatalf("Total 应透传 57,得到 %d", resp.Total)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("应返回当前页 2 条,得到 %d", len(resp.Items))
+	}
+}
+
+// List 搜索态:Q 非空时锁 page1 + limit10 + offset0(搜索不翻页)。
+func TestList_SearchModeNoPaging(t *testing.T) {
+	fc := &fakeStore{ownerItems: makeItems(searchLimit), listTotal: 99}
+	resp, err := New(fc).List(ctxRole("alice", "creator"), api.SurveyListReq{
+		Q:     "问卷",
+		Limit: 50, // 搜索态应被忽略
+		Page:  5,  // 搜索态应被忽略
+	})
+	if err != nil {
+		t.Fatalf("搜索 List 应成功,得到 %v", err)
+	}
+	if fc.listParams.Limit != searchLimit || fc.listParams.Offset != 0 {
+		t.Fatalf("搜索态应锁 limit=%d offset=0,得到 limit=%d offset=%d", searchLimit, fc.listParams.Limit, fc.listParams.Offset)
+	}
+	if len(resp.Items) != searchLimit {
+		t.Fatalf("搜索态应返回前 %d 条,得到 %d", searchLimit, len(resp.Items))
 	}
 }
 

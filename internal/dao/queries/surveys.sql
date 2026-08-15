@@ -9,15 +9,27 @@ SELECT id, owner_id, type, title, status, draft_schema, published_version, answe
 FROM surveys WHERE id = $1;
 
 -- name: ListSurveysByOwner :many
-SELECT id, title, type, status, updated_at
-FROM surveys WHERE owner_id = $1
-ORDER BY created_at DESC;
+-- creator 本人列表。offset 分页:ORDER BY created_at DESC, id DESC(id 兜底稳定序)。
+-- 过滤参数为空(nil)时短路不生效。COUNT(*) OVER() 返回筛选后总行数(LIMIT 前计数),供前端算总页数。
+SELECT id, title, type, status, updated_at, COUNT(*) OVER() AS total
+FROM surveys
+WHERE owner_id = $1
+  AND (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
 -- name: ListAllSurveys :many
 -- admin 全站视角:列出所有问卷(不限 owner)。creator/respondent 不走此查询。
-SELECT id, title, type, status, updated_at
+-- 过滤/分页语义同 ListSurveysByOwner。
+SELECT id, title, type, status, updated_at, COUNT(*) OVER() AS total
 FROM surveys
-ORDER BY created_at DESC;
+WHERE (sqlc.narg('keyword')::text IS NULL OR title ILIKE '%' || sqlc.narg('keyword') || '%')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
 -- name: UpdateDraft :exec
 UPDATE surveys

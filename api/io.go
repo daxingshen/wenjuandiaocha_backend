@@ -78,10 +78,25 @@ type SurveyListItem struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
-// List 无客户端入参(ownerID 走 Metadata),故无 Req。
-// 响应直接返回 Items 切片作 data(data:[...]),故 SurveyListResp 本身不出信封,Items 打 json:"-"。
+// SurveyListReq 列表请求。全部字段来自 URL query(非 body),按约定打 json:"-",由 handler 从 c.Query 赋值。
+// ownerID/role 仍走 Metadata,不进 Req。
+//   - Q:标题模糊搜索词。非空即进入搜索态:忽略 Page、固定返回前 10 条、Total 不用于翻页(前端隐藏页码器)。
+//   - Status/Type:过滤(空=不过滤)。
+//   - Limit:页大小(空/0 由 service 落默认 10,clamp 上限 100);搜索态锁 10。
+//   - Page:页码(1-based,空/<1 落 1);offset=(Page-1)*Limit;搜索态锁 1。
+type SurveyListReq struct {
+	Q      string `json:"-"`
+	Status string `json:"-"`
+	Type   string `json:"-"`
+	Limit  int    `json:"-"`
+	Page   int    `json:"-"`
+}
+
+// SurveyListResp offset 翻页响应:Items(当前页)+ Total(筛选后总行数,前端算总页数)。
+// 整个 struct 作信封 data(data:{items,total}),故字段带 json tag(不再裸数组)。
 type SurveyListResp struct {
-	Items []SurveyListItem `json:"-"`
+	Items []SurveyListItem `json:"items"`
+	Total int              `json:"total"`
 }
 
 type SurveyCreateReq struct {
