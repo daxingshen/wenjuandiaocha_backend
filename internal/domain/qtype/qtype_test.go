@@ -303,6 +303,54 @@ func TestTextInput(t *testing.T) {
 	if msg := h.Validate(maxlen, "abc"); msg != "" {
 		t.Errorf("恰好 3 应通过,得 %q", msg)
 	}
+
+	minlen := mkQ("q4", "text-input", false, map[string]any{"minLength": 3})
+	if msg := h.Validate(minlen, "ab"); msg != "至少 3 个字符" {
+		t.Errorf("过短应报错,得 %q", msg)
+	}
+
+	// 缺省字段(旧问卷:无 format/min/max)照常通过。
+	if msg := h.Validate(mkQ("q5", "text-input", false, map[string]any{}), "任意文本"); msg != "" {
+		t.Errorf("旧问卷无字段应通过,得 %q", msg)
+	}
+}
+
+// TestTextInputFormats 覆盖扩展的 11 项属性验证,与前端 shared/text-format.test.ts 同判。
+func TestTextInputFormats(t *testing.T) {
+	h := handler(t, "text-input")
+	cases := []struct {
+		format, value string
+		ok            bool
+	}{
+		{"integer", "-42", true}, {"integer", "4.2", false},
+		{"decimal", "-3.14", true}, {"decimal", "3.", false},
+		{"date", "2026-02-28", true}, {"date", "2026-02-30", false}, {"date", "2026-2-8", false},
+		{"age", "0", true}, {"age", "150", true}, {"age", "151", false}, {"age", "-1", false},
+		{"province", "广东省", true}, {"province", "火星省", false},
+		{"idcard", "110101199003076173", true}, {"idcard", "110101199003076170", false},
+		{"zipcode", "100000", true}, {"zipcode", "1000", false},
+		{"url", "https://example.com/x", true}, {"url", "example.com", false},
+	}
+	for _, c := range cases {
+		q := mkQ("q", "text-input", false, map[string]any{"format": c.format})
+		msg := h.Validate(q, c.value)
+		if c.ok && msg != "" {
+			t.Errorf("format=%s value=%q 应通过,得 %q", c.format, c.value, msg)
+		}
+		if !c.ok && msg == "" {
+			t.Errorf("format=%s value=%q 应被拒", c.format, c.value)
+		}
+	}
+}
+
+// TestProvinceList 省份名单哨兵:34 个,与前端 provinces.ts 数量一致。
+func TestProvinceList(t *testing.T) {
+	if len(provinceList) != 34 {
+		t.Errorf("省份名单应为 34 个,得 %d", len(provinceList))
+	}
+	if len(provinceSet) != 34 {
+		t.Errorf("省份集合应为 34 个,得 %d", len(provinceSet))
+	}
 }
 
 func TestTextarea(t *testing.T) {
@@ -313,6 +361,10 @@ func TestTextarea(t *testing.T) {
 	}
 	if msg := h.Validate(q, 42.0); msg != "答案格式应为文本" {
 		t.Errorf("非文本应报错,得 %q", msg)
+	}
+	minq := mkQ("q2", "textarea", false, map[string]any{"minLength": 5})
+	if msg := h.Validate(minq, "abc"); msg != "至少 5 个字符" {
+		t.Errorf("过短应报错,得 %q", msg)
 	}
 	rows := h.Normalize(q, "hi")
 	if len(rows) != 1 || rows[0].Value != "hi" {
@@ -446,6 +498,58 @@ func TestMatrixFill(t *testing.T) {
 	rows := h.Normalize(q, map[string]any{"r1": "abc", "r2": ""})
 	if len(rows) != 1 || rows[0].SubID != "r1" || rows[0].Value != "abc" {
 		t.Errorf("填空 normalize 不符,得 %+v", rows)
+	}
+}
+
+// TestMultiFill 与前端 multi-fill/__tests__/handler.test.ts 同判:每框独立 format/长度、
+// 必答每框非空(含空对象不绕过)、越界框、normalize 每已答框一行。
+func TestMultiFill(t *testing.T) {
+	props := map[string]any{
+		"blanks": []map[string]any{
+			{"id": "b1", "label": "收货人"},
+			{"id": "b2", "label": "手机号", "format": "phone"},
+			{"id": "b3", "label": "省份", "format": "province"},
+		},
+	}
+	q := mkQ("q1", "multi-fill", false, props)
+	qReq := mkQ("q1", "multi-fill", true, props)
+	h := handler(t, "multi-fill")
+
+	if msg := h.Validate(q, map[string]any{"b2": "13800138000"}); msg != "" {
+		t.Errorf("合法手机应通过,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"b2": "123"}); msg != "手机号格式不正确" {
+		t.Errorf("非法手机应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"b3": "火星省"}); msg != "请选择省份" {
+		t.Errorf("非法省份应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, map[string]any{"bx": "x"}); msg != "存在不属于本题的填空框" {
+		t.Errorf("越界框应报错,得 %q", msg)
+	}
+	// 必答:每框非空;空对象不绕过。
+	if msg := h.Validate(qReq, map[string]any{"b1": "张三", "b2": "13800138000", "b3": "广东省"}); msg != "" {
+		t.Errorf("必答全填应通过,得 %q", msg)
+	}
+	if msg := h.Validate(qReq, map[string]any{"b1": "张三"}); msg != "每个填空框都需作答" {
+		t.Errorf("必答缺框应报错,得 %q", msg)
+	}
+	if msg := h.Validate(qReq, map[string]any{}); msg != "每个填空框都需作答" {
+		t.Errorf("必答空对象应被拦,得 %q", msg)
+	}
+	// 每框独立字数范围。
+	lenProps := map[string]any{"blanks": []map[string]any{{"id": "b1", "minLength": 3, "maxLength": 5}}}
+	ql := mkQ("q2", "multi-fill", false, lenProps)
+	if msg := h.Validate(ql, map[string]any{"b1": "ab"}); msg != "至少 3 个字符" {
+		t.Errorf("过短应报错,得 %q", msg)
+	}
+	if msg := h.Validate(ql, map[string]any{"b1": "abcdef"}); msg != "不超过 5 个字符" {
+		t.Errorf("超长应报错,得 %q", msg)
+	}
+	// normalize:每已答框一行,按 blanks 顺序,空框不产行。
+	rows := h.Normalize(q, map[string]any{"b3": "广东省", "b1": "张三", "b2": ""})
+	if len(rows) != 2 || rows[0].SubID != "b1" || rows[0].Value != "张三" || rows[1].SubID != "b3" {
+		t.Errorf("multi-fill normalize 不符,得 %+v", rows)
 	}
 }
 

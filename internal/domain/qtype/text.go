@@ -6,7 +6,6 @@
 package qtype
 
 import (
-	"fmt"
 	"regexp"
 	"unicode/utf16"
 
@@ -27,16 +26,11 @@ var (
 )
 
 type textInputProps struct {
-	Format    string `json:"format"`    // text|email|phone;省略等于 text
+	Format    string `json:"format"`    // 11 项属性验证;省略等于 text(见 textformat.go)
+	MinLength *int   `json:"minLength"` // 省略不限
 	MaxLength *int   `json:"maxLength"` // 省略不限
-}
-
-// readFormat 复刻 readProps:非 email/phone 一律 'text'。
-func (p textInputProps) format() string {
-	if p.Format == "email" || p.Format == "phone" {
-		return p.Format
-	}
-	return "text"
+	// DefaultValue 作答态初始回显,仅供前端;后端不校验(与 dropdown 先例一致)。
+	DefaultValue *string `json:"defaultValue"`
 }
 
 type textInput struct{}
@@ -46,24 +40,7 @@ func (textInput) Type() string { return "text-input" }
 func (textInput) Validate(q domain.Question, answer any) string {
 	var p textInputProps
 	unmarshalProps(q.Props, &p)
-	s, ok := answer.(string)
-	if !ok {
-		return "答案格式应为文本"
-	}
-	if p.MaxLength != nil && utf16Len(s) > *p.MaxLength {
-		return fmt.Sprintf("不超过 %d 个字符", *p.MaxLength)
-	}
-	switch p.format() {
-	case "email":
-		if !emailRE.MatchString(s) {
-			return "邮箱格式不正确"
-		}
-	case "phone":
-		if !phoneRE.MatchString(s) {
-			return "手机号格式不正确"
-		}
-	}
-	return ""
+	return validateTextValue(answer, textRules{Format: p.Format, MinLength: p.MinLength, MaxLength: p.MaxLength})
 }
 
 func (textInput) Normalize(q domain.Question, answer any) []domain.NormalizedRow {
@@ -77,7 +54,9 @@ func (textInput) Normalize(q domain.Question, answer any) []domain.NormalizedRow
 // ---------- textarea ----------
 
 type textareaProps struct {
-	MaxLength *int `json:"maxLength"`
+	MinLength    *int    `json:"minLength"` // 省略不限
+	MaxLength    *int    `json:"maxLength"` // 省略不限
+	DefaultValue *string `json:"defaultValue"` // 前端回显,后端不校验
 }
 
 type textarea struct{}
@@ -87,14 +66,8 @@ func (textarea) Type() string { return "textarea" }
 func (textarea) Validate(q domain.Question, answer any) string {
 	var p textareaProps
 	unmarshalProps(q.Props, &p)
-	s, ok := answer.(string)
-	if !ok {
-		return "答案格式应为文本"
-	}
-	if p.MaxLength != nil && utf16Len(s) > *p.MaxLength {
-		return fmt.Sprintf("不超过 %d 个字符", *p.MaxLength)
-	}
-	return ""
+	// 多行文本无属性验证(format 恒 text),只校长度。
+	return validateTextValue(answer, textRules{Format: "text", MinLength: p.MinLength, MaxLength: p.MaxLength})
 }
 
 func (textarea) Normalize(q domain.Question, answer any) []domain.NormalizedRow {
