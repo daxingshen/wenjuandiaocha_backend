@@ -87,18 +87,48 @@ func (singleChoice) Normalize(q domain.Question, answer any) []domain.Normalized
 }
 
 // ---------- multi-choice ----------
-// answer 形状:[]any(选中的选项 value 数组,元素是 string)。
+// answer 形状:混合数组 []any,元素为裸 string(选项 value)或对象形 {value,text}
+// (选中允许填空的选项)。复刻前端 packages/question-types/src/multi-choice/handler.ts。
 // 关键:required(空数组)判断在此 handler 内,不在通用 ValidateSurvey(02-facts §6 陷阱)。
 
+// multiOption 多选选项:同单选,可带 fill(允许填空)。style/image 是纯前端渲染配置,
+// 后端不关心,反序列化时被忽略(结构体无对应字段即丢弃)。不再复用共享的裸 option。
+type multiOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Fill  *struct {
+		Enabled  bool `json:"enabled"`
+		Required bool `json:"required"`
+	} `json:"fill"`
+}
+
 type multiChoiceProps struct {
-	Options []option `json:"options"`
-	Min     *int     `json:"min"`
-	Max     *int     `json:"max"`
+	Options []multiOption `json:"options"`
+	Min     *int          `json:"min"`
+	Max     *int          `json:"max"`
 }
 
 type multiChoice struct{}
 
 func (multiChoice) Type() string { return "multi-choice" }
+
+// readMultiElem 从混合数组的单个元素取选项 value 与填空 text,兼容裸 string 与对象形 {value,text}。
+// ok=false 表示元素格式非法(既非 string 也非带 string value 的对象)。
+func readMultiElem(el any) (value string, text string, ok bool) {
+	switch e := el.(type) {
+	case string:
+		return e, "", true
+	case map[string]any:
+		v, isStr := e["value"].(string)
+		if !isStr {
+			return "", "", false
+		}
+		t, _ := e["text"].(string)
+		return v, t, true
+	default:
+		return "", "", false
+	}
+}
 
 func (multiChoice) Validate(q domain.Question, answer any) string {
 	var p multiChoiceProps
@@ -112,21 +142,27 @@ func (multiChoice) Validate(q domain.Question, answer any) string {
 	if q.Required && len(arr) == 0 {
 		return "此题为必答"
 	}
-	valid := map[string]bool{}
-	for _, o := range p.Options {
-		valid[o.Value] = true
+	optOf := map[string]*multiOption{}
+	for i := range p.Options {
+		optOf[p.Options[i].Value] = &p.Options[i]
 	}
 	seen := map[string]bool{}
-	for _, v := range arr {
-		s, isStr := v.(string)
-		if !isStr || !valid[s] {
+	for _, el := range arr {
+		value, text, elOk := readMultiElem(el)
+		opt := optOf[value]
+		if !elOk || opt == nil {
 			return "包含不存在的选项"
 		}
-		seen[s] = true
+		seen[value] = true
+		// 带填空选项:必填时文本不能为空。
+		if opt.Fill != nil && opt.Fill.Enabled && opt.Fill.Required && strings.TrimSpace(text) == "" {
+			return "请填写补充内容"
+		}
 	}
 	if len(seen) != len(arr) {
 		return "选项不可重复"
 	}
+	// min/max 按选中项个数(数组长度)计。
 	if p.Min != nil && len(arr) < *p.Min {
 		return fmt.Sprintf("至少选择 %d 项", *p.Min)
 	}
@@ -142,10 +178,17 @@ func (multiChoice) Normalize(q domain.Question, answer any) []domain.NormalizedR
 		return nil
 	}
 	// 一个选中项一行;交叉分析/频次按 value 聚合。
+	// 填空文本非空 → 追加一行,subId="<optValue>.fill"(与单选固定 "fill" 不同,
+	// 多选可有多个填空项,须按选项 value 区分)。
 	var out []domain.NormalizedRow
-	for _, v := range arr {
-		if s, isStr := v.(string); isStr && s != "" {
-			out = append(out, domain.NormalizedRow{QID: q.ID, Value: s})
+	for _, el := range arr {
+		value, text, elOk := readMultiElem(el)
+		if !elOk || value == "" {
+			continue
+		}
+		out = append(out, domain.NormalizedRow{QID: q.ID, Value: value})
+		if text != "" {
+			out = append(out, domain.NormalizedRow{QID: q.ID, SubID: value + ".fill", Value: text})
 		}
 	}
 	return out
