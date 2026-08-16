@@ -135,6 +135,114 @@ func TestMultiChoice_MinMax(t *testing.T) {
 	}
 }
 
+// TestMultiChoice_Fill 覆盖「多选带填空」:answer 是混合数组,元素为裸 string(选项 value)
+// 或对象形 {value,text}(选中允许填空的选项)。前后端一致(决策1-A 的多选延伸)。
+func TestMultiChoice_Fill(t *testing.T) {
+	q := mkQ("q1", "multi-choice", true, map[string]any{
+		"options": []map[string]any{
+			{"value": "a", "label": "A"},
+			{"value": "b", "label": "B"},
+			{"value": "other", "label": "其他", "fill": map[string]any{"enabled": true, "required": true}},
+		},
+	})
+	h := handler(t, "multi-choice")
+
+	// 混合数组合法:裸 string + 带非空文本的对象形。
+	okAns := []any{"a", map[string]any{"value": "other", "text": "具体渠道"}}
+	if msg := h.Validate(q, okAns); msg != "" {
+		t.Errorf("混合数组合法答案应通过,得 %q", msg)
+	}
+	// 旧的纯字符串数组仍然可用(other 无填空要求时才行,这里 other 必填,故只用 a/b)。
+	if msg := h.Validate(q, []any{"a", "b"}); msg != "" {
+		t.Errorf("纯字符串数组应通过,得 %q", msg)
+	}
+	// fill.required 且文本为空 → 报填空必填。
+	if msg := h.Validate(q, []any{"a", map[string]any{"value": "other", "text": ""}}); msg != "请填写补充内容" {
+		t.Errorf("必填填空空文本应报错,得 %q", msg)
+	}
+	// 裸 string 选中必填填空项(无文本)也应报填空必填。
+	if msg := h.Validate(q, []any{"other"}); msg != "请填写补充内容" {
+		t.Errorf("裸 string 选中必填填空项应报错,得 %q", msg)
+	}
+	// 含不存在的选项(对象形亦按 value 判断)。
+	if msg := h.Validate(q, []any{map[string]any{"value": "z", "text": "x"}}); msg != "包含不存在的选项" {
+		t.Errorf("对象形非法选项应报错,得 %q", msg)
+	}
+	// 重复(裸 string 与对象形 value 相同也算重复)。
+	if msg := h.Validate(q, []any{"a", map[string]any{"value": "a", "text": ""}}); msg != "选项不可重复" {
+		t.Errorf("重复选项应报错,得 %q", msg)
+	}
+
+	// normalize:每选中项一行;带非空文本的填空项追加 subId="<value>.fill" 行。
+	rows := h.Normalize(q, okAns)
+	if len(rows) != 3 {
+		t.Fatalf("混合数组 normalize 应产 3 行(a + other + other.fill),得 %+v", rows)
+	}
+	if rows[0].Value != "a" || rows[1].Value != "other" {
+		t.Errorf("前两行应为选中项 value,得 %+v", rows)
+	}
+	if rows[2].SubID != "other.fill" || rows[2].Value != "具体渠道" {
+		t.Errorf("填空行 subId 应为 other.fill、value 为文本,得 %+v", rows[2])
+	}
+	// 空文本的填空项不产 fill 行。
+	rows = h.Normalize(q, []any{map[string]any{"value": "other", "text": ""}})
+	if len(rows) != 1 || rows[0].Value != "other" || rows[0].SubID != "" {
+		t.Errorf("空文本填空项应只产 value 一行,得 %+v", rows)
+	}
+}
+
+func TestMultiChoice_MinMaxMixed(t *testing.T) {
+	// min/max 按选中项个数(数组长度)计,含对象形元素。
+	q := mkQ("q1", "multi-choice", false, map[string]any{
+		"options": []map[string]any{
+			{"value": "a", "label": "A"},
+			{"value": "b", "label": "B"},
+			{"value": "other", "label": "其他", "fill": map[string]any{"enabled": true}},
+		},
+		"min": 2,
+		"max": 2,
+	})
+	h := handler(t, "multi-choice")
+	if msg := h.Validate(q, []any{map[string]any{"value": "other", "text": "x"}}); msg != "至少选择 2 项" {
+		t.Errorf("少于 min 应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, []any{"a", "b", map[string]any{"value": "other", "text": "x"}}); msg != "最多选择 2 项" {
+		t.Errorf("多于 max 应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, []any{"a", map[string]any{"value": "other", "text": "x"}}); msg != "" {
+		t.Errorf("恰好 2 项应通过,得 %q", msg)
+	}
+}
+
+func TestDropdown(t *testing.T) {
+	q := mkQ("q1", "dropdown", true, map[string]any{
+		"options":      []map[string]string{{"value": "a", "label": "A"}, {"value": "b", "label": "B"}},
+		"defaultValue": "a",
+	})
+	h := handler(t, "dropdown")
+
+	if msg := h.Validate(q, "a"); msg != "" {
+		t.Errorf("合法选项应通过,得 %q", msg)
+	}
+	if msg := h.Validate(q, "z"); msg != "所选选项不存在" {
+		t.Errorf("非法选项应报错,得 %q", msg)
+	}
+	if msg := h.Validate(q, 123.0); msg != "答案格式应为单个选项" {
+		t.Errorf("非字符串应报格式错,得 %q", msg)
+	}
+	// 空串:交给通用必答层,dropdown 自身返回空(与单选一致语义)。
+	if msg := h.Validate(q, ""); msg != "" {
+		t.Errorf("空串应交给通用层,dropdown 自身应通过,得 %q", msg)
+	}
+	rows := h.Normalize(q, "a")
+	if len(rows) != 1 || rows[0].Value != "a" {
+		t.Errorf("normalize 应产一行 value=a,得 %+v", rows)
+	}
+	if rows := h.Normalize(q, ""); rows != nil {
+		t.Errorf("空答案不产行,得 %+v", rows)
+	}
+}
+
 func TestScale(t *testing.T) {
 	q := mkQ("q1", "scale", true, map[string]any{"min": 1, "max": 5})
 	h := handler(t, "scale")

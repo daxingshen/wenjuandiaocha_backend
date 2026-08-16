@@ -47,6 +47,18 @@ func pickComparable(raw any, subID string) any {
 	return raw
 }
 
+// pickElemValue 复刻 logic.ts 的同名助手:从多选答案的单个元素取比较值。
+// 裸 string/number 原样;带自有 value 字段的对象(多选带填空项 {value,text})取其 value。
+// 用于 includes 逐元素比较——否则对象元素永远等不上字符串 condition.value。
+func pickElemValue(el any) any {
+	if m, ok := el.(map[string]any); ok {
+		if v, has := m["value"]; has {
+			return v
+		}
+	}
+	return el
+}
+
 // jsEqual 复刻 JS 严格相等 === 在「经过 JSON 编解码的标量」上的行为。
 // JSON 数字统一是 float64;字符串比字符串;布尔比布尔;null 已在调用前排除。
 func jsEqual(a, b any) bool {
@@ -99,8 +111,10 @@ func evalCondition(c Condition, answers Answers) bool {
 		if !ok {
 			return false
 		}
+		// 元素可能是裸 value(string),也可能是带填空的对象 {value,text};
+		// 逐元素钻取其比较值(对象取 .value)后再比,才能匹配到带填空的选中项。
 		for _, item := range arr {
-			if jsEqual(item, c.Value) {
+			if jsEqual(pickElemValue(item), c.Value) {
 				return true
 			}
 		}

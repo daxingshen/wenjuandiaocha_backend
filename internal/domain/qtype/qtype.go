@@ -5,7 +5,7 @@ package qtype
 
 import "wenjuandiaocha_backend/internal/domain"
 
-// RegisterAll 注册全部题型(基础 5 + 矩阵 5)。main / 测试启动时调一次。
+// RegisterAll 注册全部题型(基础 5 + 矩阵 5 + dropdown)。main / 测试启动时调一次。
 func RegisterAll() {
 	domain.RegisterHandler(singleChoice{})
 	domain.RegisterHandler(multiChoice{})
@@ -17,4 +17,5 @@ func RegisterAll() {
 	domain.RegisterHandler(matrixScale{})
 	domain.RegisterHandler(matrixFill{})
 	domain.RegisterHandler(matrixSlider{})
+	domain.RegisterHandler(dropdown{})
 }
