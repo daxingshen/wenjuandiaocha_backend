@@ -1,11 +1,11 @@
 -- name: CreateSurvey :exec
--- answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+-- answer_access / display_mode 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
 -- 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
-INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access)
-VALUES ($1, $2, $3, $4, 'draft', $5, $6);
+INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access, display_mode)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7);
 
 -- name: GetSurvey :one
-SELECT survey_id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
+SELECT survey_id, owner_id, type, title, status, draft_schema, published_version, answer_access, display_mode, created_at, updated_at
 FROM surveys WHERE survey_id = $1;
 
 -- name: ListSurveysByOwner :many
@@ -63,6 +63,12 @@ WHERE survey_id = $1;
 -- 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
 UPDATE surveys
 SET answer_access = $2, updated_at = now()
+WHERE survey_id = $1;
+
+-- name: SetDisplayMode :exec
+-- 设作答页展示模式(paged|single)。仅 draft 可改(状态守卫在 service 层),此处只写列。
+UPDATE surveys
+SET display_mode = $2, updated_at = now()
 WHERE survey_id = $1;
 
 -- name: SetStatus :exec

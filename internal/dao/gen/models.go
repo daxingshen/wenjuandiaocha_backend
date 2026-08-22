@@ -47,6 +47,7 @@ type Survey struct {
 	DraftSchema      []byte
 	PublishedVersion *int32
 	AnswerAccess     string
+	DisplayMode      string
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 }

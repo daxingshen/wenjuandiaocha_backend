@@ -74,11 +74,12 @@ type SurveyMeta struct {
 	DraftSchema      []byte
 	PublishedVersion *int32
 	AnswerAccess     string // anonymous|login_required:谁能作答(发布时设定,D6)
+	DisplayMode      string // paged|single:作答页展示模式(draft 阶段设定)
 }
 
-func (s *Store) CreateSurvey(ctx context.Context, surveyID, ownerID, typ, title string, draftSchema []byte, answerAccess string) error {
+func (s *Store) CreateSurvey(ctx context.Context, surveyID, ownerID, typ, title string, draftSchema []byte, answerAccess, displayMode string) error {
 	return s.q.CreateSurvey(ctx, gen.CreateSurveyParams{
-		SurveyID: surveyID, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess,
+		SurveyID: surveyID, OwnerID: ownerID, Type: typ, Title: title, DraftSchema: draftSchema, AnswerAccess: answerAccess, DisplayMode: displayMode,
 	})
 }
 
@@ -89,7 +90,7 @@ func (s *Store) GetSurvey(ctx context.Context, surveyID string) (SurveyMeta, err
 	}
 	return SurveyMeta{
 		SurveyID: r.SurveyID, OwnerID: r.OwnerID, Type: r.Type, Title: r.Title, Status: r.Status,
-		DraftSchema: r.DraftSchema, PublishedVersion: r.PublishedVersion, AnswerAccess: r.AnswerAccess,
+		DraftSchema: r.DraftSchema, PublishedVersion: r.PublishedVersion, AnswerAccess: r.AnswerAccess, DisplayMode: r.DisplayMode,
 	}, nil
 }
 
@@ -191,6 +192,12 @@ func (s *Store) SetStatus(ctx context.Context, surveyID, status string) error {
 // 不校验状态/归属——「仅 draft + owner」守卫在 service 层(复用 owned() + 状态判断)。
 func (s *Store) SetAnswerAccess(ctx context.Context, surveyID, access string) error {
 	return s.q.SetAnswerAccess(ctx, gen.SetAnswerAccessParams{SurveyID: surveyID, AnswerAccess: access})
+}
+
+// SetDisplayMode 只改 display_mode 单列(作答页展示模式)。
+// 不校验状态/归属——「仅 draft + owner」守卫在 service 层(复用 owned() + 状态判断)。
+func (s *Store) SetDisplayMode(ctx context.Context, surveyID, mode string) error {
+	return s.q.SetDisplayMode(ctx, gen.SetDisplayModeParams{SurveyID: surveyID, DisplayMode: mode})
 }
 
 // GetPublishedSchema 取已发布快照的 schema jsonb;未发布/非 live 返回 ErrNotFound。

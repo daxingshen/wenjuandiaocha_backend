@@ -61,8 +61,8 @@ func (q *Queries) CountSurveysByOwner(ctx context.Context, arg CountSurveysByOwn
 }
 
 const createSurvey = `-- name: CreateSurvey :exec
-INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access)
-VALUES ($1, $2, $3, $4, 'draft', $5, $6)
+INSERT INTO surveys (survey_id, owner_id, type, title, status, draft_schema, answer_access, display_mode)
+VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7)
 `
 
 type CreateSurveyParams struct {
@@ -72,9 +72,10 @@ type CreateSurveyParams struct {
 	Title        string
 	DraftSchema  []byte
 	AnswerAccess string
+	DisplayMode  string
 }
 
-// answer_access 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
+// answer_access / display_mode 由 service 显式传入(不依赖列 DEFAULT):默认值是业务规则,归代码所有,
 // 避免「改了 001 DEFAULT 但已建库未 ALTER」导致新建落旧默认的漂移。
 func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) error {
 	_, err := q.db.Exec(ctx, createSurvey,
@@ -84,6 +85,7 @@ func (q *Queries) CreateSurvey(ctx context.Context, arg CreateSurveyParams) erro
 		arg.Title,
 		arg.DraftSchema,
 		arg.AnswerAccess,
+		arg.DisplayMode,
 	)
 	return err
 }
@@ -103,7 +105,7 @@ func (q *Queries) GetPublishedSchema(ctx context.Context, surveyID string) ([]by
 }
 
 const getSurvey = `-- name: GetSurvey :one
-SELECT survey_id, owner_id, type, title, status, draft_schema, published_version, answer_access, created_at, updated_at
+SELECT survey_id, owner_id, type, title, status, draft_schema, published_version, answer_access, display_mode, created_at, updated_at
 FROM surveys WHERE survey_id = $1
 `
 
@@ -116,6 +118,7 @@ type GetSurveyRow struct {
 	DraftSchema      []byte
 	PublishedVersion *int32
 	AnswerAccess     string
+	DisplayMode      string
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 }
@@ -132,6 +135,7 @@ func (q *Queries) GetSurvey(ctx context.Context, surveyID string) (GetSurveyRow,
 		&i.DraftSchema,
 		&i.PublishedVersion,
 		&i.AnswerAccess,
+		&i.DisplayMode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -325,6 +329,23 @@ type SetAnswerAccessParams struct {
 // 设作答访问模式(anonymous|login_required)。仅 draft 可改(状态守卫在 service 层),此处只写列。
 func (q *Queries) SetAnswerAccess(ctx context.Context, arg SetAnswerAccessParams) error {
 	_, err := q.db.Exec(ctx, setAnswerAccess, arg.SurveyID, arg.AnswerAccess)
+	return err
+}
+
+const setDisplayMode = `-- name: SetDisplayMode :exec
+UPDATE surveys
+SET display_mode = $2, updated_at = now()
+WHERE survey_id = $1
+`
+
+type SetDisplayModeParams struct {
+	SurveyID    string
+	DisplayMode string
+}
+
+// 设作答页展示模式(paged|single)。仅 draft 可改(状态守卫在 service 层),此处只写列。
+func (q *Queries) SetDisplayMode(ctx context.Context, arg SetDisplayModeParams) error {
+	_, err := q.db.Exec(ctx, setDisplayMode, arg.SurveyID, arg.DisplayMode)
 	return err
 }
 

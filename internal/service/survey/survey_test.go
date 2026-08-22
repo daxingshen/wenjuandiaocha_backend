@@ -20,8 +20,11 @@ type fakeStore struct {
 	setCalled       bool
 	publishVer      int
 	createdAccess   string // 记录 CreateSurvey 实际写入的作答模式(新建默认)
+	createdDisplay  string // 记录 CreateSurvey 实际写入的展示模式(新建默认)
 	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
 	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
+	setDisplay       string // 记录 SetDisplayMode 实际写入的展示模式
+	setDisplayCalled bool   // 记录 SetDisplayMode 是否被调用(守卫拦下时不应写)
 	listOwner       string  // 记录 ListSurveysByOwner 收到的 ownerID
 	listAllCalled   bool    // 记录是否走了全站列表(admin)
 	listKeyword     *string              // 记录两条列表分支收到的 keyword(nil=不过滤)
@@ -46,8 +49,9 @@ func (f *fakeStore) ListAllSurveys(_ context.Context, p dao.SurveyListParams) ([
 	f.listParams = p
 	return f.allItems, f.listTotal, nil
 }
-func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess string) error {
+func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess, displayMode string) error {
 	f.createdAccess = answerAccess
+	f.createdDisplay = displayMode
 	return nil
 }
 func (f *fakeStore) UpdateDraft(_ context.Context, _, _, _ string, _ []byte) error { return nil }
@@ -62,6 +66,11 @@ func (f *fakeStore) Publish(_ context.Context, _ string, _ []byte) (int, bool, e
 func (f *fakeStore) SetAnswerAccess(_ context.Context, _, access string) error {
 	f.setAccessCalled = true
 	f.setAccess = access
+	return nil
+}
+func (f *fakeStore) SetDisplayMode(_ context.Context, _, mode string) error {
+	f.setDisplayCalled = true
+	f.setDisplay = mode
 	return nil
 }
 func (f *fakeStore) CountResponses(_ context.Context, _ string) (int32, error) { return 0, nil }
@@ -217,6 +226,10 @@ func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 	// 新建默认作答模式由代码显式写入 login_required(不依赖列 DEFAULT)。
 	if f.createdAccess != "login_required" {
 		t.Fatalf("Create 应写入 login_required 默认,得到 %q", f.createdAccess)
+	}
+	// 新建默认展示模式由代码显式写入 single(不依赖列 DEFAULT)。
+	if f.createdDisplay != "single" {
+		t.Fatalf("Create 应写入 single 默认,得到 %q", f.createdDisplay)
 	}
 }
 
@@ -486,6 +499,65 @@ func TestSetAnswerAccess_InvalidValue_ReturnsBadRequest(t *testing.T) {
 	}
 	if f.setAccessCalled {
 		t.Fatal("非法值不应写库")
+	}
+}
+
+// SetDisplayMode:draft 问卷设 paged → 写列成功。
+func TestSetDisplayMode_Draft_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
+	if _, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "paged"}); err != nil {
+		t.Fatalf("draft 设展示模式应成功,得到 %v", err)
+	}
+	if f.setDisplay != "paged" {
+		t.Fatalf("SetDisplayMode 应写入 paged,得到 %q", f.setDisplay)
+	}
+}
+
+// SetDisplayMode:live 问卷 → Conflict(仅 draft 可改),且不写库。
+func TestSetDisplayMode_Live_ReturnsConflict(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
+	_, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "single"})
+	if got := codeOf(t, err); got != ecode.CodeConflict {
+		t.Fatalf("live 设展示模式 code = %d, want CodeConflict", got)
+	}
+	if f.setDisplayCalled {
+		t.Fatal("守卫拦下不应写库")
+	}
+}
+
+// SetDisplayMode:非 owner → NotFound(归属防枚举),不写库。
+func TestSetDisplayMode_NotOwner_ReturnsNotFound(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "bob", Status: "draft"}}
+	_, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "single"})
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("非 owner code = %d, want CodeNotFound", got)
+	}
+	if f.setDisplayCalled {
+		t.Fatal("归属拦下不应写库")
+	}
+}
+
+// SetDisplayMode:非法值 → BadRequest,不写库。
+func TestSetDisplayMode_InvalidValue_ReturnsBadRequest(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "draft"}}
+	_, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "bogus"})
+	if got := codeOf(t, err); got != ecode.CodeBadRequest {
+		t.Fatalf("非法值 code = %d, want CodeBadRequest", got)
+	}
+	if f.setDisplayCalled {
+		t.Fatal("非法值不应写库")
+	}
+}
+
+// Stats 回显展示模式:空/历史值回落 single(不返回空串误导前端)。
+func TestStats_EmptyDisplayMode_FallsBackSingle(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live", DisplayMode: ""}}
+	resp, err := New(f).Stats(ctxUser("alice"), api.SurveyStatsReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("Stats 应成功,得到 %v", err)
+	}
+	if resp.DisplayMode != "single" {
+		t.Fatalf("空 displayMode 回落 = %q, want single", resp.DisplayMode)
 	}
 }
 
