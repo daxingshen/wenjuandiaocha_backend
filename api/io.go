@@ -138,6 +138,13 @@ type SurveySetAnswerAccessReq struct {
 }
 type SurveySetAnswerAccessResp struct{}
 
+// SurveySetDisplayModeReq 设作答页展示模式(仅 draft 可改,守卫在 service)。
+type SurveySetDisplayModeReq struct {
+	ID          string `json:"-"`
+	DisplayMode string `json:"displayMode"` // paged|single
+}
+type SurveySetDisplayModeResp struct{}
+
 type SurveyCloseReq struct {
 	ID string `json:"-"`
 }
@@ -156,6 +163,7 @@ type SurveyStatsResp struct {
 	PublishedVersion *int32 `json:"publishedVersion"`
 	ResponseCount    int32  `json:"responseCount"`
 	AnswerAccess     string `json:"answerAccess"` // anonymous|login_required(发布页回显作答模式)
+	DisplayMode      string `json:"displayMode"`  // paged|single(发布页回显展示模式)
 }
 
 // ---------- submission 域 ----------
@@ -171,6 +179,7 @@ type GetPublishedReq struct {
 type GetPublishedResp struct {
 	Schema       json.RawMessage `json:"schema"`       // 已发布快照 SurveySchema 原始 jsonb
 	AnswerAccess string          `json:"answerAccess"` // anonymous|login_required(问卷级配置,发布时设定)
+	DisplayMode  string          `json:"displayMode"`  // paged|single(作答页展示模式,draft 阶段设定)
 }
 
 type SubmitReq struct {

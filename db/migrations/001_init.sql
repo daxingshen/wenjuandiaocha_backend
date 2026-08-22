@@ -51,12 +51,14 @@ CREATE TABLE surveys (
   draft_schema      JSONB NOT NULL,                       -- 整份 SurveySchema(编辑中)
   published_version INT,                                  -- → survey_versions.version;未发布 NULL
   answer_access     TEXT NOT NULL DEFAULT 'login_required', -- anonymous|login_required(新建默认需登录;发布前可在发布页改)
+  display_mode      TEXT NOT NULL DEFAULT 'single',        -- paged|single(作答页分页/单页展示;新建默认单页,draft 阶段可改)
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT surveys_survey_id_key UNIQUE (survey_id),
   CONSTRAINT surveys_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(user_id),
   CONSTRAINT surveys_status_chk CHECK (status IN ('draft', 'live', 'closed')),
-  CONSTRAINT surveys_answer_access_chk CHECK (answer_access IN ('anonymous', 'login_required'))
+  CONSTRAINT surveys_answer_access_chk CHECK (answer_access IN ('anonymous', 'login_required')),
+  CONSTRAINT surveys_display_mode_chk CHECK (display_mode IN ('paged', 'single'))
 );
 CREATE INDEX idx_surveys_owner ON surveys(owner_id);
 -- 问卷列表 offset 分页排序键 created_at DESC(id 代理键兜底),加索引支撑范围扫描。

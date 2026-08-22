@@ -234,6 +234,36 @@ func TestGetPublished_ReturnsAnswerAccess(t *testing.T) {
 	}
 }
 
+// GetPublished 带出 display_mode:paged 问卷返回该模式,供前端选分页作答布局。
+func TestGetPublished_ReturnsDisplayMode(t *testing.T) {
+	f := &fakeStore{
+		meta:          dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "anonymous", DisplayMode: "paged"},
+		publishedJSON: []byte(emptySchema),
+	}
+	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("GetPublished 应成功: %v", err)
+	}
+	if resp.DisplayMode != "paged" {
+		t.Fatalf("DisplayMode = %q, want paged", resp.DisplayMode)
+	}
+}
+
+// GetPublished 空 display_mode(历史数据)按 single 回落,不返回空串误导前端。
+func TestGetPublished_EmptyDisplayMode_FallsBackSingle(t *testing.T) {
+	f := &fakeStore{
+		meta:          dao.SurveyMeta{SurveyID: "s1", Status: "live", AnswerAccess: "anonymous", DisplayMode: ""},
+		publishedJSON: []byte(emptySchema),
+	}
+	resp, err := New(f).GetPublished(context.Background(), api.GetPublishedReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("GetPublished 应成功: %v", err)
+	}
+	if resp.DisplayMode != "single" {
+		t.Fatalf("空 displayMode 回落 = %q, want single", resp.DisplayMode)
+	}
+}
+
 // GetPublished 空 answer_access(历史数据)按 anonymous 回落,不返回空串误导前端。
 func TestGetPublished_EmptyAccess_FallsBackAnonymous(t *testing.T) {
 	f := &fakeStore{

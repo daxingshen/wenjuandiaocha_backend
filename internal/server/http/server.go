@@ -72,6 +72,7 @@ func (s *Server) Router() *gin.Engine {
 		sv.GET("/:id", reqAuth(rbac.ActionSurveyRead), s.getSurvey)                        //
 		sv.PUT("/:id", reqAuth(rbac.ActionSurveyUpdate), s.updateSurvey)                   //
 		sv.PATCH("/:id/answer-access", reqAuth(rbac.ActionSurveyUpdate), s.setAnswerAccess) // 设作答模式 = 改草稿,复用 Update 能力位
+		sv.PATCH("/:id/display-mode", reqAuth(rbac.ActionSurveyUpdate), s.setDisplayMode)   // 设展示模式 = 改草稿,复用 Update 能力位
 		sv.POST("/:id/publish", reqAuth(rbac.ActionSurveyPublish), s.publishSurvey)        //
 		sv.POST("/:id/close", reqAuth(rbac.ActionSurveyClose), s.closeSurvey)              //
 		sv.POST("/:id/reopen", reqAuth(rbac.ActionSurveyReopen), s.reopenSurvey)           //

@@ -26,10 +26,11 @@ type Store interface {
 	GetSurvey(ctx context.Context, id string) (dao.SurveyMeta, error)
 	ListSurveysByOwner(ctx context.Context, ownerID string, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error)
 	ListAllSurveys(ctx context.Context, p dao.SurveyListParams) ([]dao.SurveyListItem, int64, error)
-	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess string) error
+	CreateSurvey(ctx context.Context, id, ownerID, typ, title string, draftSchema []byte, answerAccess, displayMode string) error
 	UpdateDraft(ctx context.Context, id, title, typ string, draftSchema []byte) error
 	SetStatus(ctx context.Context, id, status string) error
 	SetAnswerAccess(ctx context.Context, id, access string) error
+	SetDisplayMode(ctx context.Context, id, mode string) error
 	Publish(ctx context.Context, surveyID string, draftSchema []byte) (int, bool, error)
 	CountResponses(ctx context.Context, id string) (int32, error)
 }
@@ -45,6 +46,7 @@ type Service interface {
 	Get(ctx context.Context, req api.SurveyGetReq) (api.SurveyGetResp, error)
 	Update(ctx context.Context, req api.SurveyUpdateReq) (api.SurveyUpdateResp, error)
 	SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAccessReq) (api.SurveySetAnswerAccessResp, error)
+	SetDisplayMode(ctx context.Context, req api.SurveySetDisplayModeReq) (api.SurveySetDisplayModeResp, error)
 	Publish(ctx context.Context, req api.SurveyPublishReq) (api.SurveyPublishResp, error)
 	Close(ctx context.Context, req api.SurveyCloseReq) (api.SurveyCloseResp, error)
 	Reopen(ctx context.Context, req api.SurveyReopenReq) (api.SurveyReopenResp, error)
@@ -212,8 +214,8 @@ func (m *Manager) Create(ctx context.Context, req api.SurveyCreateReq) (api.Surv
 		schema.Rules = []domain.LogicRule{}
 	}
 	schemaJSON, _ := json.Marshal(schema)
-	// 新建默认作答模式由代码显式指定(不依赖列 DEFAULT),消除「已建库未 ALTER」漂移。
-	if err := m.store.CreateSurvey(ctx, newid, ownerID, string(schema.Type), schema.Title, schemaJSON, domain.AnswerLoginRequired); err != nil {
+	// 新建默认作答模式/展示模式由代码显式指定(不依赖列 DEFAULT),消除「已建库未 ALTER」漂移。
+	if err := m.store.CreateSurvey(ctx, newid, ownerID, string(schema.Type), schema.Title, schemaJSON, domain.AnswerLoginRequired, domain.DisplaySingle); err != nil {
 		return api.SurveyCreateResp{}, err
 	}
 	return api.SurveyCreateResp{ID: newid}, nil
@@ -283,6 +285,26 @@ func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAc
 	return api.SurveySetAnswerAccessResp{}, nil
 }
 
+// SetDisplayMode 设作答页展示模式(paged|single)。仅 draft 可改:
+// 已发布(live/closed)问卷展示模式锁定(与 Update「仅草稿可编辑」同一约束,防绕接口直改)。
+// 复用 owned() 归属校验(非 owner → 404 防枚举);值域白名单(非法 → BadRequest,不只靠列 CHECK)。
+func (m *Manager) SetDisplayMode(ctx context.Context, req api.SurveySetDisplayModeReq) (api.SurveySetDisplayModeResp, error) {
+	if req.DisplayMode != domain.DisplayPaged && req.DisplayMode != domain.DisplaySingle {
+		return api.SurveySetDisplayModeResp{}, ecode.BadRequest("作答页展示模式非法")
+	}
+	meta, err := m.owned(ctx, req.ID)
+	if err != nil {
+		return api.SurveySetDisplayModeResp{}, err
+	}
+	if meta.Status != domain.StatusDraft {
+		return api.SurveySetDisplayModeResp{}, ecode.Conflict(msgEditForbidden)
+	}
+	if err := m.store.SetDisplayMode(ctx, meta.SurveyID, req.DisplayMode); err != nil {
+		return api.SurveySetDisplayModeResp{}, err
+	}
+	return api.SurveySetDisplayModeResp{}, nil
+}
+
 // Close 结束回收(live → closed)。状态机守卫:仅 live 可结束。
 func (m *Manager) Close(ctx context.Context, req api.SurveyCloseReq) (api.SurveyCloseResp, error) {
 	meta, err := m.owned(ctx, req.ID)
@@ -327,5 +349,9 @@ func (m *Manager) Stats(ctx context.Context, req api.SurveyStatsReq) (api.Survey
 	if access == "" {
 		access = domain.AnswerAnonymous
 	}
-	return api.SurveyStatsResp{Status: meta.Status, PublishedVersion: meta.PublishedVersion, ResponseCount: count, AnswerAccess: access}, nil
+	display := meta.DisplayMode
+	if display == "" {
+		display = domain.DisplaySingle
+	}
+	return api.SurveyStatsResp{Status: meta.Status, PublishedVersion: meta.PublishedVersion, ResponseCount: count, AnswerAccess: access, DisplayMode: display}, nil
 }

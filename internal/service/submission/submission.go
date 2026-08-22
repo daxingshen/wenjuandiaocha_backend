@@ -68,7 +68,12 @@ func (m *Manager) GetPublished(ctx context.Context, req api.GetPublishedReq) (ap
 	if access == "" {
 		access = domain.AnswerAnonymous
 	}
-	return api.GetPublishedResp{Schema: b, AnswerAccess: access}, nil
+	// 展示模式同理带出:前端据此选分页/单页作答布局。空/历史值按 single。
+	display := meta.DisplayMode
+	if display == "" {
+		display = domain.DisplaySingle
+	}
+	return api.GetPublishedResp{Schema: b, AnswerAccess: access, DisplayMode: display}, nil
 }
 
 // Submit 提交答卷。Version>0 按该历史版快照校验(版本锚定);0 回落当前发布版。

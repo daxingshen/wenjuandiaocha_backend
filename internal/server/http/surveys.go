@@ -98,6 +98,22 @@ func (s *Server) setAnswerAccess(c *gin.Context) {
 	render.JSON(c, nil, nil)
 }
 
+// setDisplayMode PATCH /api/surveys/:id/display-mode —— 设作答页展示模式(仅 draft 可改,守卫在 service)。
+func (s *Server) setDisplayMode(c *gin.Context) {
+	// api.SurveySetDisplayModeReq 带 json tag(displayMode),bind body 后从 c.Param 覆盖 ID。
+	var req api.SurveySetDisplayModeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		render.Fail(c, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+	req.ID = c.Param("id")
+	if _, err := s.surveys.SetDisplayMode(c.Request.Context(), req); err != nil {
+		render.JSON(c, nil, err)
+		return
+	}
+	render.JSON(c, nil, nil)
+}
+
 // closeSurvey POST /api/surveys/:id/close —— 结束回收(live → closed)。状态机守卫在 service。
 func (s *Server) closeSurvey(c *gin.Context) {
 	if _, err := s.surveys.Close(c.Request.Context(), api.SurveyCloseReq{ID: c.Param("id")}); err != nil {
