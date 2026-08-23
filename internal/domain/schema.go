@@ -42,6 +42,12 @@ type SurveySchema struct {
 	Questions []Question  `json:"questions"`
 	// Rules 逻辑规则,独立于题目(约束 3)。
 	Rules []LogicRule `json:"rules"`
+	// Welcome 欢迎页富内容(可选):作答者正式作答前先看到的一屏。
+	// 后端当不透明字节存/传,不解析内容(富文本 HTML 的渲染消毒在前端)。
+	// 用 json.RawMessage 保真:Create/Copy 的 Unmarshal→Marshal 往返若未声明此字段会静默丢弃它
+	// (对齐前端 packages/engine/src/schema.ts 的 SurveySchema.welcome,否则 wire 传来的 welcome 被吞)。
+	// omitempty:旧 schema(无 welcome)不写空字段,保持向后兼容。
+	Welcome json.RawMessage `json:"welcome,omitempty"`
 }
 
 // ConditionOp 条件比较运算符。语义集中在 logic.go 的 evalCondition。
