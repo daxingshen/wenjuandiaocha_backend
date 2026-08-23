@@ -241,6 +241,35 @@ func TestCreate_EmptyBody_AssignsID(t *testing.T) {
 	}
 }
 
+// Create 保真欢迎页富内容:Body 含 welcome(富文本 HTML 串)→ 落库 schema 应原样保留该字段。
+// 若 domain.SurveySchema 未声明 Welcome 字段,Create 的 Unmarshal→Marshal 往返会静默丢弃它(survey.go:196→217),
+// 本测试即钉住该往返保真;删掉字段声明此测试必红。后端当不透明字节存,不解析 HTML。
+func TestCreate_PreservesWelcome(t *testing.T) {
+	f := &fakeStore{}
+	m := New(f)
+	body := []byte(`{"title":"满意度","welcome":{"html":"<p>欢迎</p>"}}`)
+	if _, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: body}); err != nil {
+		t.Fatalf("Create 应成功,得到 %v", err)
+	}
+	var got domain.SurveySchema
+	if err := json.Unmarshal(f.createdSchema, &got); err != nil {
+		t.Fatalf("落库 schema 应为合法 JSON,得到 %v", err)
+	}
+	if len(got.Welcome) == 0 {
+		t.Fatalf("Create 应保真 welcome 字段,落库 schema 丢失了它:%s", f.createdSchema)
+	}
+	// 再解回内容,确认 html 串没被吞。
+	var wc struct {
+		HTML string `json:"html"`
+	}
+	if err := json.Unmarshal(got.Welcome, &wc); err != nil {
+		t.Fatalf("welcome 应为合法 JSON,得到 %v", err)
+	}
+	if wc.HTML != "<p>欢迎</p>" {
+		t.Fatalf("welcome html 应保真为「<p>欢迎</p>」,得到 %s", got.Welcome)
+	}
+}
+
 // Create:非法 JSON → 400。
 func TestCreate_BadJSON_Returns400(t *testing.T) {
 	f := &fakeStore{}
