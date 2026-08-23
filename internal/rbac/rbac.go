@@ -25,6 +25,7 @@ const (
 	ActionSurveyRead    Action = "survey:read"    // 读草稿(创作端)
 	ActionSurveyStats   Action = "survey:stats"   // 看回收统计
 	ActionSurveyCreate  Action = "survey:create"  // 新建
+	ActionSurveyCopy    Action = "survey:copy"    // 复制(读源 + 建新 draft;产物归操作者)
 	ActionSurveyUpdate  Action = "survey:update"  // 改草稿
 	ActionSurveyPublish Action = "survey:publish" // 发布
 	ActionSurveyClose   Action = "survey:close"   // 结束
@@ -41,6 +42,7 @@ var matrix = map[Role]map[Action]bool{
 		ActionSurveyRead:    true,
 		ActionSurveyStats:   true,
 		ActionSurveyCreate:  true,
+		ActionSurveyCopy:    true,
 		ActionSurveyUpdate:  true,
 		ActionSurveyPublish: true,
 		ActionSurveyClose:   true,
@@ -53,6 +55,7 @@ var matrix = map[Role]map[Action]bool{
 		ActionSurveyRead:    true,
 		ActionSurveyStats:   true,
 		ActionSurveyCreate:  true,
+		ActionSurveyCopy:    true,
 		ActionSurveyUpdate:  true,
 		ActionSurveyPublish: true,
 		ActionSurveyClose:   true,

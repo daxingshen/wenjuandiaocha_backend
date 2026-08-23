@@ -106,6 +106,15 @@ type SurveyCreateResp struct {
 	ID string `json:"id"`
 }
 
+// SurveyCopyReq 复制问卷只需源 ID:把源草稿结构整份拷入一个新 draft 问卷(标题加「(副本)」、
+// 沿用源作答配置),后端分配新 id。owner 恒为当前操作者。
+type SurveyCopyReq struct {
+	ID string `json:"-"` // 源问卷 ID,URL 路径参数
+}
+type SurveyCopyResp struct {
+	ID string `json:"id"` // 新问卷的后端分配 id
+}
+
 type SurveyGetReq struct {
 	ID string `json:"-"` // ID 为 URL 路径参数
 }

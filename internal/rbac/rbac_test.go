@@ -7,21 +7,21 @@ import "testing"
 func TestCan_FullMatrix(t *testing.T) {
 	allActions := []Action{
 		ActionSurveyList, ActionSurveyRead, ActionSurveyStats, ActionSurveyCreate,
-		ActionSurveyUpdate, ActionSurveyPublish, ActionSurveyClose, ActionSurveyReopen,
+		ActionSurveyCopy, ActionSurveyUpdate, ActionSurveyPublish, ActionSurveyClose, ActionSurveyReopen,
 		ActionSubmitAnswer, ActionAccountManage,
 	}
 
-	// creator 的创作端 8 动作全 ✓,作答/账号管理 ✗。
+	// creator 的创作端 9 动作全 ✓,作答/账号管理 ✗。
 	creatorWant := map[Action]bool{
 		ActionSurveyList: true, ActionSurveyRead: true, ActionSurveyStats: true,
-		ActionSurveyCreate: true, ActionSurveyUpdate: true, ActionSurveyPublish: true,
+		ActionSurveyCreate: true, ActionSurveyCopy: true, ActionSurveyUpdate: true, ActionSurveyPublish: true,
 		ActionSurveyClose: true, ActionSurveyReopen: true,
 		ActionSubmitAnswer: false, ActionAccountManage: false,
 	}
 	// respondent 仅作答 ✓,其余全 ✗。
 	respondentWant := map[Action]bool{
 		ActionSurveyList: false, ActionSurveyRead: false, ActionSurveyStats: false,
-		ActionSurveyCreate: false, ActionSurveyUpdate: false, ActionSurveyPublish: false,
+		ActionSurveyCreate: false, ActionSurveyCopy: false, ActionSurveyUpdate: false, ActionSurveyPublish: false,
 		ActionSurveyClose: false, ActionSurveyReopen: false,
 		ActionSubmitAnswer: true, ActionAccountManage: false,
 	}
@@ -57,7 +57,7 @@ func TestCan_SubmitAnswer_RoleSplit(t *testing.T) {
 func TestCan_Respondent_StudioDenied(t *testing.T) {
 	studio := []Action{
 		ActionSurveyList, ActionSurveyRead, ActionSurveyStats, ActionSurveyCreate,
-		ActionSurveyUpdate, ActionSurveyPublish, ActionSurveyClose, ActionSurveyReopen,
+		ActionSurveyCopy, ActionSurveyUpdate, ActionSurveyPublish, ActionSurveyClose, ActionSurveyReopen,
 	}
 	for _, a := range studio {
 		if Can(RoleRespondent, a) {

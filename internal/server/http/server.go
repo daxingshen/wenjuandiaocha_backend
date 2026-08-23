@@ -69,6 +69,7 @@ func (s *Server) Router() *gin.Engine {
 	{
 		sv.GET("", reqAuth(rbac.ActionSurveyList), s.listSurveys)                          // admin 全站/creator 本人范围在 service
 		sv.POST("", reqAuth(rbac.ActionSurveyCreate), s.createSurvey)                      //
+		sv.POST("/:id/copy", reqAuth(rbac.ActionSurveyCopy), s.copySurvey)                 // 复制为新 draft
 		sv.GET("/:id", reqAuth(rbac.ActionSurveyRead), s.getSurvey)                        //
 		sv.PUT("/:id", reqAuth(rbac.ActionSurveyUpdate), s.updateSurvey)                   //
 		sv.PATCH("/:id/answer-access", reqAuth(rbac.ActionSurveyUpdate), s.setAnswerAccess) // 设作答模式 = 改草稿,复用 Update 能力位

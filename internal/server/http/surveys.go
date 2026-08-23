@@ -43,6 +43,17 @@ func (s *Server) createSurvey(c *gin.Context) {
 	render.JSON(c, resp, nil)
 }
 
+// copySurvey POST /api/surveys/:id/copy —— 复制源问卷为新 draft,返回 { id }(后端分配新 id)。归属校验。
+func (s *Server) copySurvey(c *gin.Context) {
+	resp, err := s.surveys.Copy(c.Request.Context(), api.SurveyCopyReq{ID: c.Param("id")})
+	if err != nil {
+		render.JSON(c, nil, err)
+		return
+	}
+	// SurveyCopyResp{ID json:"id"} 作 data → data:{id}。
+	render.JSON(c, resp, nil)
+}
+
 // getSurvey GET /api/surveys/:id —— 返回草稿 SurveySchema(供编辑)。归属校验。
 func (s *Server) getSurvey(c *gin.Context) {
 	resp, err := s.surveys.Get(c.Request.Context(), api.SurveyGetReq{ID: c.Param("id")})

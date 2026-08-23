@@ -43,6 +43,7 @@ type Store interface {
 type Service interface {
 	List(ctx context.Context, req api.SurveyListReq) (api.SurveyListResp, error)
 	Create(ctx context.Context, req api.SurveyCreateReq) (api.SurveyCreateResp, error)
+	Copy(ctx context.Context, req api.SurveyCopyReq) (api.SurveyCopyResp, error)
 	Get(ctx context.Context, req api.SurveyGetReq) (api.SurveyGetResp, error)
 	Update(ctx context.Context, req api.SurveyUpdateReq) (api.SurveyUpdateResp, error)
 	SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAccessReq) (api.SurveySetAnswerAccessResp, error)
@@ -219,6 +220,48 @@ func (m *Manager) Create(ctx context.Context, req api.SurveyCreateReq) (api.Surv
 		return api.SurveyCreateResp{}, err
 	}
 	return api.SurveyCreateResp{ID: newid}, nil
+}
+
+// Copy 复制问卷:把源问卷的草稿结构整份派生为一个新 draft 问卷,让「已发布不可编辑」的问卷
+// 能以副本形式继续演化。归属校验(owned:非 owner 404,admin 短路)后,读源 draft_schema →
+// 分配新 id、标题加「(副本)」、version 归 1(新草稿无发布史)→ 沿用源作答/展示配置 → 落库 draft。
+// 新问卷 owner 恒为当前操作者(admin 复制他人问卷产物也归 admin 本人,与 Create 一致);
+// 后端强制分配 id,不接受任何客户端传入 id(源 id 只用于定位,不进新问卷)。
+func (m *Manager) Copy(ctx context.Context, req api.SurveyCopyReq) (api.SurveyCopyResp, error) {
+	meta, err := m.owned(ctx, req.ID)
+	if err != nil {
+		return api.SurveyCopyResp{}, err
+	}
+	// 源 draft_schema 落库时已 marshal,恒为合法 JSON;解析失败仅在数据损坏时发生,按内部错误透传。
+	var schema domain.SurveySchema
+	if err := json.Unmarshal(meta.DraftSchema, &schema); err != nil {
+		return api.SurveyCopyResp{}, ecode.Internal("源问卷数据损坏")
+	}
+	newid := id.New()
+	schema.ID = newid
+	schema.Title = schema.Title + "（副本）"
+	schema.Version = 1 // 新草稿从头计版,与源的发布历史无关
+	if schema.Questions == nil {
+		schema.Questions = []domain.Question{}
+	}
+	if schema.Rules == nil {
+		schema.Rules = []domain.LogicRule{}
+	}
+	// 沿用源作答配置(空值回落与 Stats 一致的默认),而非一律回落新建默认。
+	access := meta.AnswerAccess
+	if access == "" {
+		access = domain.AnswerAnonymous
+	}
+	display := meta.DisplayMode
+	if display == "" {
+		display = domain.DisplaySingle
+	}
+	schemaJSON, _ := json.Marshal(schema)
+	ownerID := metadata.From(ctx).UserID
+	if err := m.store.CreateSurvey(ctx, newid, ownerID, string(schema.Type), schema.Title, schemaJSON, access, display); err != nil {
+		return api.SurveyCopyResp{}, err
+	}
+	return api.SurveyCopyResp{ID: newid}, nil
 }
 
 // Get 返回草稿 SurveySchema 原始 jsonb(供编辑)。归属校验。

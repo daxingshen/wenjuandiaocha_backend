@@ -2,36 +2,41 @@ package survey
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"testing"
 
 	"wenjuandiaocha_backend/api"
 	"wenjuandiaocha_backend/internal/dao"
+	"wenjuandiaocha_backend/internal/domain"
 	"wenjuandiaocha_backend/internal/ecode"
 	"wenjuandiaocha_backend/internal/lib/metadata"
 )
 
 // fakeStore 只实现被测路径需要的方法;其余返回零值。
 type fakeStore struct {
-	meta            dao.SurveyMeta
-	getErr          error
-	setStatus       string // 记录 SetStatus 实际写入的状态
-	setCalled       bool
-	publishVer      int
-	createdAccess   string // 记录 CreateSurvey 实际写入的作答模式(新建默认)
-	createdDisplay  string // 记录 CreateSurvey 实际写入的展示模式(新建默认)
-	setAccess       string // 记录 SetAnswerAccess 实际写入的作答模式
-	setAccessCalled bool   // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
-	setDisplay       string // 记录 SetDisplayMode 实际写入的展示模式
-	setDisplayCalled bool   // 记录 SetDisplayMode 是否被调用(守卫拦下时不应写)
-	listOwner       string  // 记录 ListSurveysByOwner 收到的 ownerID
-	listAllCalled   bool    // 记录是否走了全站列表(admin)
-	listKeyword     *string              // 记录两条列表分支收到的 keyword(nil=不过滤)
-	listParams      dao.SurveyListParams // 记录列表分支收到的完整参数(limit/offset/status/type 断言用)
-	listTotal       int64                // fake 返回的总行数(COUNT(*) OVER())
-	ownerItems      []dao.SurveyListItem
-	allItems        []dao.SurveyListItem
+	meta             dao.SurveyMeta
+	getErr           error
+	setStatus        string // 记录 SetStatus 实际写入的状态
+	setCalled        bool
+	publishVer       int
+	createdAccess    string               // 记录 CreateSurvey 实际写入的作答模式(新建默认)
+	createdDisplay   string               // 记录 CreateSurvey 实际写入的展示模式(新建默认)
+	createdOwner     string               // 记录 CreateSurvey 实际写入的 ownerID(复制归属断言)
+	createdTitle     string               // 记录 CreateSurvey 实际写入的标题(复制副本后缀断言)
+	createdSchema    []byte               // 记录 CreateSurvey 实际写入的 schema jsonb(复制内容断言)
+	setAccess        string               // 记录 SetAnswerAccess 实际写入的作答模式
+	setAccessCalled  bool                 // 记录 SetAnswerAccess 是否被调用(守卫拦下时不应写)
+	setDisplay       string               // 记录 SetDisplayMode 实际写入的展示模式
+	setDisplayCalled bool                 // 记录 SetDisplayMode 是否被调用(守卫拦下时不应写)
+	listOwner        string               // 记录 ListSurveysByOwner 收到的 ownerID
+	listAllCalled    bool                 // 记录是否走了全站列表(admin)
+	listKeyword      *string              // 记录两条列表分支收到的 keyword(nil=不过滤)
+	listParams       dao.SurveyListParams // 记录列表分支收到的完整参数(limit/offset/status/type 断言用)
+	listTotal        int64                // fake 返回的总行数(COUNT(*) OVER())
+	ownerItems       []dao.SurveyListItem
+	allItems         []dao.SurveyListItem
 }
 
 func (f *fakeStore) GetSurvey(_ context.Context, _ string) (dao.SurveyMeta, error) {
@@ -49,7 +54,10 @@ func (f *fakeStore) ListAllSurveys(_ context.Context, p dao.SurveyListParams) ([
 	f.listParams = p
 	return f.allItems, f.listTotal, nil
 }
-func (f *fakeStore) CreateSurvey(_ context.Context, _, _, _, _ string, _ []byte, answerAccess, displayMode string) error {
+func (f *fakeStore) CreateSurvey(_ context.Context, _, ownerID, _, title string, draftSchema []byte, answerAccess, displayMode string) error {
+	f.createdOwner = ownerID
+	f.createdTitle = title
+	f.createdSchema = draftSchema
 	f.createdAccess = answerAccess
 	f.createdDisplay = displayMode
 	return nil
@@ -240,6 +248,72 @@ func TestCreate_BadJSON_Returns400(t *testing.T) {
 	_, err := m.Create(ctxUser("alice"), api.SurveyCreateReq{Body: []byte("{not json")})
 	if got := codeOf(t, err); got != ecode.CodeBadRequest {
 		t.Fatalf("非法 JSON Create code = %d, want CodeBadRequest", got)
+	}
+}
+
+// Copy:发布态问卷复制成 draft —— 新 id、标题加副本后缀、沿用源作答/展示配置、归操作者。
+func TestCopy_LiveSurvey_DerivesDraft(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{
+		SurveyID: "s1", OwnerID: "alice", Type: "survey", Status: "live",
+		DraftSchema:  []byte(`{"id":"s1","type":"survey","title":"客户满意度","version":3,"questions":[{"id":"q1"}],"rules":[]}`),
+		AnswerAccess: "anonymous", DisplayMode: "paged",
+	}}
+	m := New(f)
+	resp, err := m.Copy(ctxUser("alice"), api.SurveyCopyReq{ID: "s1"})
+	if err != nil {
+		t.Fatalf("Copy 应成功,得到 %v", err)
+	}
+	if resp.ID == "" || resp.ID == "s1" {
+		t.Fatalf("Copy 应分配全新非空 id,得到 %q", resp.ID)
+	}
+	if f.createdOwner != "alice" {
+		t.Fatalf("副本 owner 应为操作者 alice,得到 %q", f.createdOwner)
+	}
+	if f.createdTitle != "客户满意度（副本）" {
+		t.Fatalf("副本标题应加「(副本)」后缀,得到 %q", f.createdTitle)
+	}
+	// 沿用源作答/展示配置,而非回落新建默认。
+	if f.createdAccess != "anonymous" || f.createdDisplay != "paged" {
+		t.Fatalf("副本应沿用源配置 anonymous/paged,得到 %q/%q", f.createdAccess, f.createdDisplay)
+	}
+	// 落库 schema:id 换新、version 归 1、题目结构保留。
+	var got domain.SurveySchema
+	if err := json.Unmarshal(f.createdSchema, &got); err != nil {
+		t.Fatalf("副本 schema 应为合法 JSON,得到 %v", err)
+	}
+	if got.ID != resp.ID {
+		t.Fatalf("副本 schema.id 应为新 id %q,得到 %q", resp.ID, got.ID)
+	}
+	if got.Version != 1 {
+		t.Fatalf("副本 version 应归 1,得到 %d", got.Version)
+	}
+	if len(got.Questions) != 1 {
+		t.Fatalf("副本应保留源题目结构(1 题),得到 %d 题", len(got.Questions))
+	}
+}
+
+// Copy:非本人复制 → 404(第二层归属,不泄露存在性)。
+func TestCopy_CrossUser_ReturnsNotFound(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live", DraftSchema: []byte(`{"id":"s1"}`)}}
+	m := New(f)
+	_, err := m.Copy(ctxRole("bob", "creator"), api.SurveyCopyReq{ID: "s1"})
+	if got := codeOf(t, err); got != ecode.CodeNotFound {
+		t.Fatalf("非本人 Copy code = %d, want CodeNotFound", got)
+	}
+}
+
+// Copy:admin 复制他人问卷 → 放行,但副本归 admin 本人(与 Create 一致,不做跨 owner 归属)。
+func TestCopy_Admin_CrossOwner_OwnedByOperator(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{
+		SurveyID: "s1", OwnerID: "alice", Type: "survey", Status: "closed",
+		DraftSchema: []byte(`{"id":"s1","title":"旧卷","version":2}`), AnswerAccess: "login_required", DisplayMode: "single",
+	}}
+	m := New(f)
+	if _, err := m.Copy(ctxRole("admin-user", "admin"), api.SurveyCopyReq{ID: "s1"}); err != nil {
+		t.Fatalf("admin 跨 owner 复制应放行,得到 %v", err)
+	}
+	if f.createdOwner != "admin-user" {
+		t.Fatalf("admin 复制的副本应归操作者 admin-user,得到 %q", f.createdOwner)
 	}
 }
 
