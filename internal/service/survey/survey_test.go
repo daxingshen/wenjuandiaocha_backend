@@ -569,15 +569,25 @@ func TestSetAnswerAccess_Draft_Succeeds(t *testing.T) {
 	}
 }
 
-// SetAnswerAccess:live 问卷 → Conflict(仅 draft 可改),且不写库。
-func TestSetAnswerAccess_Live_ReturnsConflict(t *testing.T) {
+// SetAnswerAccess:发布后放开 —— live 问卷设 anonymous → 无 error 且落库(状态守卫已删)。
+func TestSetAnswerAccess_Live_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
-	_, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"})
-	if got := codeOf(t, err); got != ecode.CodeConflict {
-		t.Fatalf("live 设作答模式 code = %d, want CodeConflict", got)
+	if _, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "anonymous"}); err != nil {
+		t.Fatalf("live 设作答模式应放行,得到 %v", err)
 	}
-	if f.setAccessCalled {
-		t.Fatal("守卫拦下不应写库")
+	if !f.setAccessCalled || f.setAccess != "anonymous" {
+		t.Fatalf("live 设作答模式应落库 anonymous,得到 called=%v value=%q", f.setAccessCalled, f.setAccess)
+	}
+}
+
+// SetAnswerAccess:发布后放开 —— closed 问卷设 login_required → 无 error 且落库。
+func TestSetAnswerAccess_Closed_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "closed"}}
+	if _, err := New(f).SetAnswerAccess(ctxUser("alice"), api.SurveySetAnswerAccessReq{ID: "s1", AnswerAccess: "login_required"}); err != nil {
+		t.Fatalf("closed 设作答模式应放行,得到 %v", err)
+	}
+	if !f.setAccessCalled || f.setAccess != "login_required" {
+		t.Fatalf("closed 设作答模式应落库 login_required,得到 called=%v value=%q", f.setAccessCalled, f.setAccess)
 	}
 }
 
@@ -616,15 +626,25 @@ func TestSetDisplayMode_Draft_Succeeds(t *testing.T) {
 	}
 }
 
-// SetDisplayMode:live 问卷 → Conflict(仅 draft 可改),且不写库。
-func TestSetDisplayMode_Live_ReturnsConflict(t *testing.T) {
+// SetDisplayMode:发布后放开 —— live 问卷设 single → 无 error 且落库(状态守卫已删)。
+func TestSetDisplayMode_Live_Succeeds(t *testing.T) {
 	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "live"}}
-	_, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "single"})
-	if got := codeOf(t, err); got != ecode.CodeConflict {
-		t.Fatalf("live 设展示模式 code = %d, want CodeConflict", got)
+	if _, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "single"}); err != nil {
+		t.Fatalf("live 设展示模式应放行,得到 %v", err)
 	}
-	if f.setDisplayCalled {
-		t.Fatal("守卫拦下不应写库")
+	if !f.setDisplayCalled || f.setDisplay != "single" {
+		t.Fatalf("live 设展示模式应落库 single,得到 called=%v value=%q", f.setDisplayCalled, f.setDisplay)
+	}
+}
+
+// SetDisplayMode:发布后放开 —— closed 问卷设 paged → 无 error 且落库。
+func TestSetDisplayMode_Closed_Succeeds(t *testing.T) {
+	f := &fakeStore{meta: dao.SurveyMeta{SurveyID: "s1", OwnerID: "alice", Status: "closed"}}
+	if _, err := New(f).SetDisplayMode(ctxUser("alice"), api.SurveySetDisplayModeReq{ID: "s1", DisplayMode: "paged"}); err != nil {
+		t.Fatalf("closed 设展示模式应放行,得到 %v", err)
+	}
+	if !f.setDisplayCalled || f.setDisplay != "paged" {
+		t.Fatalf("closed 设展示模式应落库 paged,得到 called=%v value=%q", f.setDisplayCalled, f.setDisplay)
 	}
 }
 

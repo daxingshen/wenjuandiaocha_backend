@@ -308,8 +308,8 @@ func (m *Manager) Publish(ctx context.Context, req api.SurveyPublishReq) (api.Su
 	return api.SurveyPublishResp{Version: version, Unchanged: unchanged}, nil
 }
 
-// SetAnswerAccess 设作答访问模式(anonymous|login_required)。仅 draft 可改:
-// 已发布(live/closed)问卷作答模式锁定(与 Update「仅草稿可编辑」同一约束,防绕接口直改)。
+// SetAnswerAccess 设作答访问模式(anonymous|login_required)。任意状态(draft/live/closed)均可改:
+// 作答配置是发布后仍可调的运营开关,不随内容一同冻结(与 Update「仅草稿可编辑」不同,不设状态守卫)。
 // 复用 owned() 归属校验(非 owner → 404 防枚举);值域白名单(非法 → BadRequest,不只靠列 CHECK)。
 func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAccessReq) (api.SurveySetAnswerAccessResp, error) {
 	if req.AnswerAccess != domain.AnswerAnonymous && req.AnswerAccess != domain.AnswerLoginRequired {
@@ -319,17 +319,14 @@ func (m *Manager) SetAnswerAccess(ctx context.Context, req api.SurveySetAnswerAc
 	if err != nil {
 		return api.SurveySetAnswerAccessResp{}, err
 	}
-	if meta.Status != domain.StatusDraft {
-		return api.SurveySetAnswerAccessResp{}, ecode.Conflict(msgEditForbidden)
-	}
 	if err := m.store.SetAnswerAccess(ctx, meta.SurveyID, req.AnswerAccess); err != nil {
 		return api.SurveySetAnswerAccessResp{}, err
 	}
 	return api.SurveySetAnswerAccessResp{}, nil
 }
 
-// SetDisplayMode 设作答页展示模式(paged|single)。仅 draft 可改:
-// 已发布(live/closed)问卷展示模式锁定(与 Update「仅草稿可编辑」同一约束,防绕接口直改)。
+// SetDisplayMode 设作答页展示模式(paged|single)。任意状态(draft/live/closed)均可改:
+// 展示配置是发布后仍可调的运营开关,不随内容一同冻结(与 Update「仅草稿可编辑」不同,不设状态守卫)。
 // 复用 owned() 归属校验(非 owner → 404 防枚举);值域白名单(非法 → BadRequest,不只靠列 CHECK)。
 func (m *Manager) SetDisplayMode(ctx context.Context, req api.SurveySetDisplayModeReq) (api.SurveySetDisplayModeResp, error) {
 	if req.DisplayMode != domain.DisplayPaged && req.DisplayMode != domain.DisplaySingle {
@@ -338,9 +335,6 @@ func (m *Manager) SetDisplayMode(ctx context.Context, req api.SurveySetDisplayMo
 	meta, err := m.owned(ctx, req.ID)
 	if err != nil {
 		return api.SurveySetDisplayModeResp{}, err
-	}
-	if meta.Status != domain.StatusDraft {
-		return api.SurveySetDisplayModeResp{}, ecode.Conflict(msgEditForbidden)
 	}
 	if err := m.store.SetDisplayMode(ctx, meta.SurveyID, req.DisplayMode); err != nil {
 		return api.SurveySetDisplayModeResp{}, err
