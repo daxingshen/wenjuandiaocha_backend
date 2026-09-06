@@ -1,0 +1,16 @@
+# 精简后端构建上下文。别把本地二进制、密钥、vcs 元数据送进 builder。
+.git
+.gitignore
+.env
+*.env
+bin/
+server
+seed
+*.exe
+vendor/
+.idea/
+.vscode/
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
