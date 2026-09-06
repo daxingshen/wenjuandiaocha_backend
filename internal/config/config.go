@@ -10,17 +10,17 @@ import (
 
 // Config 服务配置。
 type Config struct {
-	DatabaseURL   string
-	HTTPAddr      string
-	SessionTTL    time.Duration
-	CookieSecure  bool // 生产置 true(仅 HTTPS 下发 cookie)
+	DatabaseURL  string
+	HTTPAddr     string
+	SessionTTL   time.Duration
+	CookieSecure bool // 生产置 true(仅 HTTPS 下发 cookie)
 }
 
 // Load 读环境变量,缺关键项报错。
 func Load() (Config, error) {
 	c := Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
-		HTTPAddr:    getenv("HTTP_ADDR", ":8080"),
+		HTTPAddr:    getenv("HTTP_ADDR", ":18080"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("缺 DATABASE_URL")
