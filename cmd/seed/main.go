@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
 	"wenjuandiaocha_backend/internal/config"
@@ -34,13 +33,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	st, cleanup, err := dao.New(ctx, cfg)
 	if err != nil {
 		slog.Error("连接 Postgres 失败", "err", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
-	st := dao.New(pool)
+	defer cleanup()
 
 	// 幂等:已存在则跳过。
 	if _, err := st.GetUserByAccount(ctx, *account); err == nil {

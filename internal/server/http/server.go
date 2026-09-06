@@ -34,6 +34,9 @@ func NewServer(surveys survey.Service, submissions submission.Service, auth svca
 	return &Server{surveys: surveys, submissions: submissions, auth: auth, cfg: cfg}
 }
 
+// Addr 返回监听地址(取自注入的 config)。供 main 起服务用,免得 main 再持 config。
+func (s *Server) Addr() string { return s.cfg.HTTPAddr }
+
 // Router 构建 gin 引擎:全局中间件 + 路由分组。
 func (s *Server) Router() *gin.Engine {
 	r := gin.New()

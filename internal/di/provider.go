@@ -1,5 +1,5 @@
-// Package di 用 google/wire 编译期装配依赖图。
-// pool 的创建/ping/close 是生命周期关切,留在 cmd/server/main;wire 组装 pool 下游。
+// Package di 用 google/wire 编译期装配依赖图(config → 连接池 → dao → service → http)。
+// 连接池的创建/ping 收拢在 dao.New,cleanup 经 InitServer 冒泡给 main 关闭。
 package di
 
 import (
