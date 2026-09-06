@@ -7,6 +7,10 @@
 FROM golang:1.25 AS builder
 WORKDIR /src
 
+# 模块代理换国内源(阿里云),避免直连 proxy.golang.org 超时;
+# 作用于下方 go mod download 与 go install goose 两处拉网。
+ENV GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+
 # 先拷 go.mod/go.sum 拉依赖,利用层缓存(源码变动不必重拉)。
 COPY go.mod go.sum ./
 RUN go mod download
