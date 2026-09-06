@@ -6,7 +6,12 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/google/wire"
 )
+
+// ProviderSet 供 wire 组装:直接把 Load 作为 config.Config 的 provider(缺关键项时注入报错)。
+var ProviderSet = wire.NewSet(Load)
 
 // Config 服务配置。
 type Config struct {
@@ -20,7 +25,9 @@ type Config struct {
 func Load() (Config, error) {
 	c := Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
-		HTTPAddr:    getenv("HTTP_ADDR", ":18080"),
+		// 监听端口用纯数字 HTTP_PORT(默认 8089),内部拼成 gin 要的 ":port" 地址。
+		// 用纯数字而非带冒号的地址:同一个值能在 docker-compose 里直接当端口映射用,不会踩 "8089::8089"。
+		HTTPAddr: ":" + getenv("HTTP_PORT", "8089"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("缺 DATABASE_URL")

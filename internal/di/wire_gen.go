@@ -7,7 +7,7 @@
 package di
 
 import (
-	"github.com/jackc/pgx/v5/pgxpool"
+	"context"
 	"wenjuandiaocha_backend/internal/config"
 	"wenjuandiaocha_backend/internal/dao"
 	"wenjuandiaocha_backend/internal/server/http"
@@ -18,14 +18,23 @@ import (
 
 // Injectors from wire.go:
 
-// InitServer 从连接池 + config 组装出 *http.Server。
-// pool 的生命周期(创建/ping/close)由调用方(main)负责,不进 wire。
-func InitServer(pool *pgxpool.Pool, cfg config.Config) *http.Server {
-	store := dao.New(pool)
+// InitServer 组装整个依赖图:config(读环境)→ 连接池 → dao → 3 managers → *http.Server。
+// 返回 cleanup(关连接池)与 error(config 缺项 / 连库失败),由 main 负责调用/退出。
+func InitServer(ctx context.Context) (*http.Server, func(), error) {
+	configConfig, err := config.Load()
+	if err != nil {
+		return nil, nil, err
+	}
+	store, cleanup, err := dao.New(ctx, configConfig)
+	if err != nil {
+		return nil, nil, err
+	}
 	manager := survey.New(store)
 	submissionManager := submission.New(store)
-	duration := provideSessionTTL(cfg)
+	duration := provideSessionTTL(configConfig)
 	authManager := auth.New(store, duration)
-	server := http.NewServer(manager, submissionManager, authManager, cfg)
-	return server
+	server := http.NewServer(manager, submissionManager, authManager, configConfig)
+	return server, func() {
+		cleanup()
+	}, nil
 }

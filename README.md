@@ -14,12 +14,12 @@ Go 1.25 · gin · sqlc + pgx/v5 · goose(迁移)· PostgreSQL 17 · bcrypt + DB-
 cp .env.example .env          # 按需改;默认 pg 映射到本机 5433(避开 5432 已有实例)
 make db-up                    # docker 起 postgres 17
 make migrate                  # 建表(goose 跑 db/migrations/001_init.sql)
-make seed                     # 建初始账号(默认 admin / admin123,读 .env SEED_*)
-make run                      # 起服务 → :8080
+make seed                     # 建初始账号(默认 admin / admin123,参数走 CLI flag,见 cmd/seed -h)
+make run                      # 起服务 → :8089
 ```
 
 前后端联调:后端 `make run`,前端 `pnpm dev:studio`(5173)/ `pnpm dev:runtime`(5174)。
-两个 vite 已配 `/api` 代理到 `:8080`,同源带 cookie、免 CORS。studio 用 seed 账号登录。
+两个 vite 已配 `/api` 代理到 `:8089`,同源带 cookie、免 CORS。studio 用 seed 账号登录。
 
 ## 全栈一键启停(docker compose)
 
@@ -29,7 +29,7 @@ UI 仓,**须两仓并列 checkout**(`../wenjuandiaocha_ui`)。
 ```bash
 cp .env.example .env          # 可选,用默认值也能跑
 docker compose up -d          # 首启:自动建表(goose)+ seed 账号 + 起服务(约几分钟构建)
-# 浏览器打开 http://localhost:18080
+# 浏览器打开 http://localhost:8088
 #   /              → studio 管理端(seed 账号 admin / admin123 登录)
 #   /f/#/s/<id>    → runtime 作答端(发布问卷后由 studio 生成分享链接)
 #   /api/*         → 后端(nginx 同源反代,cookie 生效)
@@ -40,8 +40,8 @@ docker compose down           # 删容器(数据卷 pgdata 保留,重启数据�
 docker compose down -v        # 连库一起清空,从零重来
 ```
 
-拓扑:`db`(postgres17)→ `init`(一次性 goose 迁移 + seed,幂等)→ `backend`(Go 服务,仅内网 `:8080`)、
-`web`(nginx:唯一对外端口 `WEB_PORT`,默认 18080;`/`→studio、`/f/`→runtime、`/api`→backend)。
+拓扑:`db`(postgres17)→ `init`(一次性 goose 迁移 + seed,幂等)→ `backend`(Go 服务,对外 `HTTP_PORT`,默认 8089,便于直连调试)、
+`web`(nginx:前端对外 8088;`/`→studio、`/f/`→runtime、`/api`→backend)。浏览器访问 `http://localhost:8088`。
 自定义 seed 账号:改 `docker-compose.yml` 里 `init` 的 command,给 `/app/seed` 传 `-account/-password/-name/-role`
 (seed 读 CLI flag,不读 `SEED_*` 环境变量)。
 

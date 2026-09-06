@@ -4,8 +4,9 @@
 package di
 
 import (
+	"context"
+
 	"github.com/google/wire"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"wenjuandiaocha_backend/internal/config"
 	"wenjuandiaocha_backend/internal/dao"
@@ -15,10 +16,11 @@ import (
 	"wenjuandiaocha_backend/internal/service/survey"
 )
 
-// InitServer 从连接池 + config 组装出 *http.Server。
-// pool 的生命周期(创建/ping/close)由调用方(main)负责,不进 wire。
-func InitServer(pool *pgxpool.Pool, cfg config.Config) *xhttp.Server {
+// InitServer 组装整个依赖图:config(读环境)→ 连接池 → dao → 3 managers → *http.Server。
+// 返回 cleanup(关连接池)与 error(config 缺项 / 连库失败),由 main 负责调用/退出。
+func InitServer(ctx context.Context) (*xhttp.Server, func(), error) {
 	wire.Build(
+		config.ProviderSet,
 		provideSessionTTL,
 		dao.ProviderSet,
 		survey.ProviderSet,
@@ -30,5 +32,5 @@ func InitServer(pool *pgxpool.Pool, cfg config.Config) *xhttp.Server {
 		wire.Bind(new(submission.Store), new(*dao.Store)),
 		wire.Bind(new(svcauth.Store), new(*dao.Store)),
 	)
-	return nil
+	return nil, nil, nil
 }

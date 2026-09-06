@@ -63,7 +63,7 @@ make db-up                 # 起 postgres(docker,本机已有 pg17 镜像)
 make migrate               # 建表
 make sqlc                  # 从 SQL 生成 Go(改了 queries/迁移后跑)
 make seed                  # 建 seed 账号
-make run                   # 起服务 :8080
+make run                   # 起服务 :8089
 make test                  # go test ./...(含黄金向量)
 make vet
 ```

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"wenjuandiaocha_backend/internal/config"
 	"wenjuandiaocha_backend/internal/dao/gen"
 	"wenjuandiaocha_backend/internal/domain"
 )
@@ -20,7 +21,7 @@ import (
 // ErrNotFound 统一的「查无」错误,http 层据此回 404。
 var ErrNotFound = errors.New("not found")
 
-// ProviderSet 供 wire 组装:从 *pgxpool.Pool 建 *Store。
+// ProviderSet 供 wire 组装:从 config 建连接池并组装 *Store(New)。
 var ProviderSet = wire.NewSet(New)
 
 // Store 数据访问门面。
@@ -29,9 +30,18 @@ type Store struct {
 	q    *gen.Queries
 }
 
-// New 用连接池建 Store。
-func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool, q: gen.New(pool)}
+// New 从 config 建连接池、ping 探活,再组装 *Store。连接池的创建/ping/close 收拢在本包:
+// 上层只认 *Store,不碰 pgxpool。返回 cleanup(关池)供 wire 汇总;连接失败即报错冒泡给调用方。
+func New(ctx context.Context, cfg config.Config) (*Store, func(), error) {
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("连接 Postgres: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, nil, fmt.Errorf("Postgres ping: %w", err)
+	}
+	return &Store{pool: pool, q: gen.New(pool)}, func() { pool.Close() }, nil
 }
 
 // Pool 暴露底层池(供健康检查/关闭)。
